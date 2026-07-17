@@ -1,46 +1,63 @@
 #!/usr/bin/env python3
-"""Full-screen main-menu background for the Facility lobby GUI.
+"""Custom menu artwork for the Facility lobby GUIs.
 
-The background is drawn INTO THE INVENTORY TITLE as a font glyph, the same
-trick the SCiPNET terminal screens use (see Terminal/tools/gen_gui.py):
+Server plugins can't draw real buttons on the client, so the whole menu look
+is a resource-pack trick (the same one the SCiPNET terminal uses, see
+Terminal/tools/gen_gui.py):
 
-  1. A negative-space advance rewinds the text cursor to the GUI's top-left
-     corner (advance -8 pulls back past the title's first character cell).
-  2. One big bitmap glyph with ascent 13 puts its TOP EDGE exactly at the
-     container's (0,0), painting a full 176-wide panel over the vanilla chrome.
-  3. Item icons render at a higher z-level than title text, so the menu buttons
-     stay visible on top of the painted background.
+  1. A negative-space advance rewinds the inventory title's cursor to the GUI
+     top-left corner, then ONE big bitmap glyph (ascent 13 -> top edge at the
+     container's 0,0) paints a full 176-wide panel over the vanilla chest.
+  2. The panel bakes the SCREENSHOT look: a dark facility screen with
+     full-width gray BUTTON BARS and their labels (PLAY, SELECT TEAM).
+  3. Clickable but INVISIBLE items (facility:blank model) fill every slot under
+     a bar, so the whole bar is clickable while only the painted bar shows.
+  4. Item icons render above the title text, so team icons stay visible on top.
 
-mainmenu.yml's `title:` embeds:  "<neg-8><neg-176 pull><glyph>SITE-19 // MAIN MENU"
-so the glyph is drawn first (as the background), then the readable header text.
+Two backgrounds are produced - the main menu and the team selector - each its
+own bitmap glyph in font/menu.json, plus a transparent item model for the
+invisible click targets.
 
-Pure stdlib - no PIL. Writes:
-  resource-pack/assets/facility/textures/font/menu_bg.png   (176 x 222)
-  resource-pack/assets/facility/font/menu.json              (space + bitmap providers)
-
-Run from the repo root:  python3 tools/gen_menu.py
+Pure stdlib - no PIL. Run from the repo root:  python3 tools/gen_menu.py
 """
 import json, os, struct, zlib
 
-# SCP facility terminal palette - dark with cyan/green phosphor accents.
-BG      = (6, 10, 12, 255)      # near-black panel
-BORDER  = (0, 150, 140, 255)    # cyan frame
-INNER   = (0, 70, 66, 255)      # dim inner frame
-HEADER  = (120, 255, 170, 255)  # CRT green header text
-AMBER   = (255, 176, 64, 255)   # warning amber accent
-SLOT_BG = (12, 20, 18, 255)     # slot well
-SLOT_ED = (28, 70, 56, 255)     # slot outline
-SCAN    = (10, 26, 24, 255)     # faint scanline
+# ---- palette: dark facility screen + light-gray vanilla-style buttons -------
+PANEL   = (10, 13, 17, 255)     # near-black screen
+EDGE    = (0, 150, 140, 255)    # cyan frame
+INNER   = (0, 66, 62, 255)      # dim inner frame
+HEADER  = (120, 255, 170, 255)  # CRT green header
+AMBER   = (255, 176, 64, 255)   # warning tick
+SCAN    = (14, 20, 24, 255)     # faint scanline
 
+BTN_FACE = (99, 99, 99, 255)    # gray button fill (like the screenshot)
+BTN_TOP  = (146, 146, 146, 255) # top highlight
+BTN_BOT  = (48, 48, 48, 255)    # bottom shadow
+BTN_EDGE = (18, 18, 18, 255)    # dark border
+LABEL    = (238, 238, 238, 255) # button text
+PLAY_AC  = (90, 220, 120, 255)  # green accent for PLAY
+TEAM_AC  = (90, 190, 230, 255)  # cyan accent for SELECT TEAM
+WELL_BG  = (16, 22, 26, 255)    # team-slot well
+WELL_ED  = (30, 72, 60, 255)    # well edge
+
+# ---- a compact 3x5 pixel font (only what the panels bake) -------------------
 FONT3X5 = {
-    "S": ["111","100","111","001","111"], "I": ["111","010","010","010","111"],
-    "T": ["111","010","010","010","010"], "E": ["111","100","111","100","111"],
-    "1": ["010","110","010","010","111"], "9": ["111","101","111","001","111"],
-    "M": ["101","111","111","101","101"], "A": ["111","101","111","101","101"],
-    "N": ["101","111","111","111","101"], "U": ["101","101","101","101","111"],
-    "/": ["001","001","010","100","100"], " ": ["000","000","000","000","000"],
-    "-": ["000","000","111","000","000"],
+    "A": ["111","101","111","101","101"], "B": ["110","101","110","101","110"],
+    "C": ["111","100","100","100","111"], "D": ["110","101","101","101","110"],
+    "E": ["111","100","111","100","111"], "F": ["111","100","111","100","100"],
+    "G": ["111","100","101","101","111"], "H": ["101","101","111","101","101"],
+    "I": ["111","010","010","010","111"], "K": ["101","110","100","110","101"],
+    "L": ["100","100","100","100","111"], "M": ["101","111","111","101","101"],
+    "N": ["101","111","111","111","101"], "O": ["111","101","101","101","111"],
+    "P": ["111","101","111","100","100"], "R": ["110","101","110","101","101"],
+    "S": ["111","100","111","001","111"], "T": ["111","010","010","010","010"],
+    "U": ["101","101","101","101","111"], "V": ["101","101","101","101","010"],
+    "Y": ["101","101","010","010","010"], "1": ["010","110","010","010","111"],
+    "9": ["111","101","111","001","111"], "0": ["111","101","101","101","111"],
+    "/": ["001","001","010","100","100"], "-": ["000","000","111","000","000"],
+    " ": ["000","000","000","000","000"],
 }
+
 
 class Canvas:
     def __init__(self, w, h):
@@ -59,12 +76,17 @@ class Canvas:
 
     def text(self, x, y, s, color, scale=2):
         for ch in s:
-            rows = FONT3X5.get(ch, FONT3X5[" "])
+            rows = FONT3X5.get(ch.upper(), FONT3X5[" "])
             for ry, row in enumerate(rows):
                 for rx, bit in enumerate(row):
                     if bit == "1":
                         self.fill(x + rx * scale, y + ry * scale, scale, scale, color)
             x += 4 * scale
+        return x
+
+    def text_centered(self, cx, y, s, color, scale=2):
+        width = len(s) * 4 * scale - scale
+        self.text(cx - width // 2, y, s, color, scale)
 
     def png(self, path):
         rows = b"".join(b"\x00" + b"".join(bytes(p) for p in line) for line in self.px)
@@ -79,46 +101,93 @@ class Canvas:
         print(f"{path} ({self.w}x{self.h})")
 
 
-out = os.path.join(os.path.dirname(__file__), "..", "resource-pack", "assets", "facility")
-tex = os.path.join(out, "textures", "font")
+# Chest-54 content geometry: 9 columns x 6 rows of 18px cells; the top-left
+# cell's corner sits at (7, 17) in the 176x222 GUI texture.
+CELL = 18
+GRID_X, GRID_Y = 7, 17
+CONTENT_W = 9 * CELL          # 162
 
-# 6-row chest (size 54): 176 wide x 222 tall - the full menu panel.
-c = Canvas(176, 222)
-c.fill(0, 0, c.w, c.h, BG)
-# faint horizontal scanlines for CRT flavour
-for y in range(2, c.h, 2):
-    c.fill(1, y, c.w - 2, 1, SCAN)
-c.box(0, 0, c.w, c.h, BORDER)
-c.box(1, 1, c.w - 2, c.h - 2, INNER)
-# header band
-c.fill(3, 3, c.w - 6, 11, (10, 30, 28, 255))
-c.fill(3, 14, c.w - 6, 1, INNER)
-c.text(8, 4, "SITE-19 // MAIN MENU", HEADER, scale=2)
-# amber status tick, top-right
-c.fill(c.w - 10, 5, 4, 4, AMBER)
-# the 6x9 slot grid the buttons sit in (top edge at y=17, 18px cells)
-for r in range(6):
-    for col in range(9):
-        x = 7 + col * 18
-        y = 17 + r * 18
-        c.fill(x, y, 18, 18, SLOT_BG)
-        c.box(x, y, 18, 18, SLOT_ED)
-# footer divider
-c.fill(3, c.h - 6, c.w - 6, 1, INNER)
-c.png(os.path.join(tex, "menu_bg.png"))
 
-# The font that carries the overlay. Two negative-space advances:
-#   "" = -8   (rewind past the first title character cell)
-#   "" = -168 (pull the cursor back to the panel's left edge after glyph)
-# and the bitmap glyph "" (ascent 13 -> top edge at container 0,0).
+def screen(header):
+    """A fresh dark facility screen with the header band drawn."""
+    c = Canvas(176, 222)
+    c.fill(0, 0, c.w, c.h, PANEL)
+    for y in range(2, 132, 2):                    # scanlines over the chest area
+        c.fill(1, y, c.w - 2, 1, SCAN)
+    c.box(0, 0, c.w, c.h, EDGE)
+    c.box(1, 1, c.w - 2, c.h - 2, INNER)
+    c.fill(3, 3, c.w - 6, 11, (10, 30, 28, 255))  # header band
+    c.fill(3, 14, c.w - 6, 1, INNER)
+    c.text(8, 4, header, HEADER, scale=2)
+    c.fill(c.w - 10, 5, 4, 4, AMBER)              # amber status tick
+    return c
+
+
+def button_bar(c, row, label, accent):
+    """A full-width gray button bar across one grid row, screenshot-style."""
+    x = GRID_X
+    y = GRID_Y + row * CELL
+    w, h = CONTENT_W, CELL
+    c.fill(x, y + 1, w, h - 2, BTN_FACE)
+    c.fill(x, y + 1, w, 1, BTN_TOP)
+    c.fill(x, y + h - 2, w, 1, BTN_BOT)
+    c.box(x, y, w, h, BTN_EDGE)
+    c.fill(x + 2, y + 2, 3, h - 4, accent)        # left accent stripe
+    c.fill(x + w - 5, y + 2, 3, h - 4, accent)    # right accent stripe
+    c.text_centered(x + w // 2, y + 5, label, LABEL, scale=2)
+
+
+def team_well(c, row, col):
+    """One 18px slot well for a team icon."""
+    x = GRID_X + col * CELL
+    y = GRID_Y + row * CELL
+    c.fill(x, y, CELL, CELL, WELL_BG)
+    c.box(x, y, CELL, CELL, WELL_ED)
+
+
+base = os.path.join(os.path.dirname(__file__), "..", "resource-pack", "assets", "facility")
+tex_font = os.path.join(base, "textures", "font")
+
+# ---- main menu: PLAY (row 1) + SELECT TEAM (row 3) --------------------------
+m = screen("SITE-19 // MAIN MENU")
+button_bar(m, 1, "PLAY", PLAY_AC)
+button_bar(m, 3, "SELECT TEAM", TEAM_AC)
+m.text(8, GRID_Y + 5 * CELL + 4, "AWAITING ENTRY", (70, 110, 100, 255), scale=2)
+m.png(os.path.join(tex_font, "menu_bg.png"))
+
+# ---- team selector: header + two rows of icon wells (slots 10.. / 19..) -----
+t = screen("SITE-19 // SELECT TEAM")
+for col in range(1, 8):
+    team_well(t, 1, col)
+    team_well(t, 3, col)
+t.text_centered(88, GRID_Y + 5 * CELL + 4, "CLICK A TEAM TO DEPLOY", (70, 110, 100, 255), scale=2)
+t.png(os.path.join(tex_font, "teams_bg.png"))
+
+# ---- transparent 16x16 for the invisible click targets ---------------------
+blank = Canvas(16, 16)          # all pixels stay (0,0,0,0)
+blank.png(os.path.join(base, "textures", "item", "blank.png"))
+
+# ---- models: a fully transparent item model --------------------------------
+model_dir = os.path.join(base, "models", "item")
+os.makedirs(model_dir, exist_ok=True)
+with open(os.path.join(model_dir, "blank.json"), "w") as f:
+    json.dump({"parent": "minecraft:item/generated",
+               "textures": {"layer0": "facility:item/blank"}}, f, indent=2)
+print(os.path.join(model_dir, "blank.json"))
+
+# ---- the font carrying both panels -----------------------------------------
+#  = space advance -8 (rewind past the title's first character cell).
+#  = main-menu panel glyph,  = team-selector panel glyph.
 font = {
     "providers": [
-        {"type": "space", "advances": {"": -8, "": -168}},
+        {"type": "space", "advances": {"": -8}},
         {"type": "bitmap", "file": "facility:font/menu_bg.png",
          "ascent": 13, "height": 222, "chars": [""]},
+        {"type": "bitmap", "file": "facility:font/teams_bg.png",
+         "ascent": 13, "height": 222, "chars": [""]},
     ]
 }
-os.makedirs(os.path.join(out, "font"), exist_ok=True)
-with open(os.path.join(out, "font", "menu.json"), "w") as f:
+os.makedirs(os.path.join(base, "font"), exist_ok=True)
+with open(os.path.join(base, "font", "menu.json"), "w") as f:
     json.dump(font, f, indent=2, ensure_ascii=False)
-print(os.path.join(out, "font", "menu.json"))
+print(os.path.join(base, "font", "menu.json"))

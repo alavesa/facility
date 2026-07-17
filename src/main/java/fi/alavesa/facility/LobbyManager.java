@@ -14,6 +14,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
@@ -30,8 +31,9 @@ import java.util.UUID;
  * world proper. If they had a pending combat-log death we float a hologram of
  * it in front of them once they land.
  *
- * DeluxeMenus draws the menu when present ({@code deluxemenus open mainmenu});
- * absent, a built-in fallback keeps the plugin self-sufficient.
+ * The menu is drawn by our own {@link FallbackMenu} (custom chest GUIs) - the
+ * ONLY time a player is thrown to the menu is on rejoin. Death/respawn never
+ * locks them (see {@link #onRespawn}); {@code /menu} lets them return by hand.
  */
 public final class LobbyManager implements Listener {
 
@@ -68,6 +70,23 @@ public final class LobbyManager implements Listener {
         continued.remove(player.getUniqueId());
     }
 
+    /**
+     * Dying must NEVER throw a player back to the menu - the menu is a rejoin-
+     * only thing. A player who has already Continued this session stays
+     * Continued through death, so no join-style lock can fire on the respawn.
+     * This handler makes that explicit and is a hard guard against any future
+     * path (or another plugin) trying to spectator-lock them on death.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        if (continued.contains(player.getUniqueId())) return;   // already in-world: leave them be
+        // Not marked Continued (e.g. died during the same tick they joined):
+        // treat them as Continued so the respawn drops them into the world,
+        // not the menu. They can reopen it with /menu.
+        continued.add(player.getUniqueId());
+    }
+
     /** Freeze the player at the lobby vantage in spectator and open the menu. */
     private void lock(Player player) {
         if (!player.isOnline() || continued.contains(player.getUniqueId())) return;
@@ -77,14 +96,20 @@ public final class LobbyManager implements Listener {
         openMainMenu(player);
     }
 
-    /** Open the DeluxeMenus main menu if present, else the built-in fallback. */
+    /** Open the custom main menu (our own chest GUI). */
     public void openMainMenu(Player player) {
-        if (Bukkit.getPluginManager().getPlugin("DeluxeMenus") != null) {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
-                "deluxemenus open mainmenu " + player.getName());
-        } else {
-            fallback.open(player);
-        }
+        fallback.open(player);
+    }
+
+    /**
+     * {@code /menu}: send the player back to the menu by hand. Re-locks them
+     * into spectator at the vantage and reopens the menu, exactly like a fresh
+     * rejoin - their return point is snapshotted first so Continue still works.
+     */
+    public void returnToMenu(Player player) {
+        if (player.getGameMode() != GameMode.SPECTATOR) store.saveLogout(player);
+        continued.remove(player.getUniqueId());
+        lock(player);
     }
 
     // --- continue -----------------------------------------------------------

@@ -18,14 +18,15 @@ import java.util.stream.Stream;
 
 /**
  * Facility - the SITE-19 lobby brain. New arrivals are frozen in spectator at
- * a menu vantage until they press Continue; the menu (DeluxeMenus, or a
- * built-in fallback) lets them pick a team and drops them into the world. A
+ * a menu vantage until they press Play; the custom menu (our own chest GUIs in
+ * {@link FallbackMenu}) lets them pick a team and drops them into the world. A
  * combat-log system tags PvP for {@value CombatLogListener#COMBAT_LOG_SECONDS}
  * seconds and turns a tagged logout into a death.
  *
- * The DeluxeMenus buttons invoke this plugin's own commands, so every menu
- * action has a backing command here. LuckPerms ranks are set via the console
- * `lp user ... parent set ...` fallback (see TeamManager) - no LuckPerms
+ * The menu buttons invoke this plugin's own commands, so every menu action has
+ * a backing command here. The menu is a REJOIN-only thing (plus {@code /menu}
+ * by hand); dying never sends you there. LuckPerms ranks are set via the
+ * console `lp user ... parent set ...` fallback (see TeamManager) - no LuckPerms
  * maven dependency, robust whether or not it's loaded.
  */
 public final class FacilityPlugin extends JavaPlugin {
@@ -83,6 +84,14 @@ public final class FacilityPlugin extends JavaPlugin {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        // /menu - return to the main menu by hand (the only OTHER way to reach
+        // the menu besides rejoining the server).
+        if (command.getName().equalsIgnoreCase("menu")) {
+            if (!(sender instanceof Player player)) return error(sender, "Players only.");
+            if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+            lobby.returnToMenu(player);
+            return true;
+        }
         if (args.length == 0) return usage(sender);
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "continue" -> {
@@ -187,13 +196,7 @@ public final class FacilityPlugin extends JavaPlugin {
     }
 
     private void openTeams(Player player) {
-        if (Bukkit.getPluginManager().getPlugin("DeluxeMenus") != null) {
-            // team_selector.yml ships alongside mainmenu.yml
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
-                "deluxemenus open team_selector " + player.getName());
-        } else {
-            fallback.openTeams(player);
-        }
+        fallback.openTeams(player);
     }
 
     // --- tab completion -----------------------------------------------------

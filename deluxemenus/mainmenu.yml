@@ -1,0 +1,45 @@
+# Facility main menu - open with:  deluxemenus open mainmenu <player>
+#
+# The Facility plugin dispatches this on join for new arrivals. Buttons run
+# this plugin's own commands. The full-screen background is painted by the
+# resource-pack font glyph embedded in `menu_title` below (see
+# resource-pack/assets/facility/font/menu.json + tools/gen_menu.py):
+#   U+F801 = space advance -8  (rewind the title cursor to the panel edge)
+#   U+E000 = the 176x222 SITE-19 // MAIN MENU background bitmap (ascent 13)
+# Copy this file to plugins/DeluxeMenus/gui_menus/mainmenu.yml.
+menu_title: '&8Site-19'
+open_command: mainmenu
+size: 54
+items:
+  background:
+    material: GRAY_STAINED_GLASS_PANE
+    slots: [0,1,2,3,4,5,6,7,8,45,46,47,48,50,51,52,53]
+    display_name: '&r'
+    priority: 10
+  continue:
+    material: LIME_CONCRETE
+    slot: 20
+    display_name: '&aContinue'
+    lore:
+      - '&7Enter the facility.'
+      - '&7Return to where you last stood.'
+    left_click_commands:
+      - '[player] facility continue'
+      - '[close]'
+  select_team:
+    material: NETHERITE_HELMET
+    slot: 24
+    display_name: '&bSelect Team'
+    lore:
+      - '&7Choose your allegiance.'
+    left_click_commands:
+      - '[player] facility teams'
+  stats:
+    material: PAPER
+    slot: 49
+    display_name: '&fSITE-19 Terminal'
+    lore:
+      - '&8Operative: &7%player_name%'
+      - '&8World: &7%player_world%'
+      - '&8Ping: &7%player_ping%ms'
+      - '&8Status: &7Awaiting entry'

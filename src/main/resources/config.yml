@@ -1,0 +1,47 @@
+# Facility - SITE-19 lobby / teams / combat-log config.
+#
+# The lobby vantage new arrivals are frozen at while the main menu is open.
+# If unset, we freeze them wherever they logged in / world spawn. Set with a
+# world name to pin the menu camera somewhere scenic (a window over the site).
+lobby:
+  world: ""        # blank = use the player's current world / its spawn
+  x: 0.5
+  y: 100.0
+  z: 0.5
+  yaw: 0.0
+  pitch: 0.0
+
+# Combat-log tag length, in seconds. Re-taking damage refreshes it. Logging
+# out while tagged is treated as a death (see COMBAT_LOG_SECONDS in code).
+combat:
+  seconds: 15
+
+# Teams. type: public = anyone may join; private = must be granted first
+# (see /facility grant). rank = the LuckPerms group set on the player when
+# they join the team. icon = the Material shown in the team selector.
+teams:
+  guards:
+    display: "&bGuards"
+    type: public
+    rank: guard
+    icon: IRON_CHESTPLATE
+  classd:
+    display: "&eClass-D"
+    type: public
+    rank: classd
+    icon: ORANGE_WOOL
+  scientist:
+    display: "&fFoundation Staff"
+    type: public
+    rank: scientist
+    icon: LEATHER_CHESTPLATE
+  mtf:
+    display: "&cMTF Epsilon-11"
+    type: private
+    rank: mtf
+    icon: NETHERITE_HELMET
+
+# Per-team grant list for PRIVATE teams. Managed at runtime by
+# /facility grant|revoke - each entry is a player UUID. Do not hand-edit
+# unless you know the UUIDs.
+grants: {}

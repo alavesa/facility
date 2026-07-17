@@ -1,0 +1,19 @@
+name: Facility
+version: '0.1.0'
+main: fi.alavesa.facility.FacilityPlugin
+api-version: '1.21'
+author: Piia Alavesa
+description: Main menu / lobby / teams / combat-log system for the SITE-19 SCP prison RP server.
+softdepend: [DeluxeMenus, LuckPerms, Labra]
+commands:
+  facility:
+    description: Lobby menu, team selection, and admin team management
+    usage: /facility <continue|teams|team|grant|revoke|reload>
+    aliases: [fac]
+permissions:
+  facility.use:
+    description: Use the lobby menu, continue into the world, and pick a public team
+    default: true
+  facility.admin:
+    description: Add/remove teams, grant/revoke private-team access, reload config
+    default: op

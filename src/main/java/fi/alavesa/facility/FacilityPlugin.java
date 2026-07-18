@@ -34,7 +34,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private PlayerStore store;
     private TeamManager teams;
     private LobbyManager lobby;
-    private BookMenu bookMenu;
+    private DialogMenu dialogMenu;
     private CombatLogListener combat;
 
     private NamespacedKey teamKey;
@@ -48,8 +48,8 @@ public final class FacilityPlugin extends JavaPlugin {
         teams = new TeamManager(this);
         teams.load();
 
-        bookMenu = new BookMenu(teams);
-        lobby = new LobbyManager(this, store, bookMenu);
+        dialogMenu = new DialogMenu(teams);
+        lobby = new LobbyManager(this, store, dialogMenu);
         combat = new CombatLogListener(this, store);
 
         getServer().getPluginManager().registerEvents(lobby, this);
@@ -168,7 +168,10 @@ public final class FacilityPlugin extends JavaPlugin {
         Team team = teams.get(sub);
         if (team == null) return error(sender, "No team named '" + args[1] + "'.");
         if (!teams.mayJoin(team, player)) {
-            return error(sender, "This team is private - ask an admin for access.");
+            player.sendMessage(Component.text("This team is private - ask an admin for access.",
+                NamedTextColor.RED));
+            openTeams(player);   // the dialog closed on click; reopen it, don't strand them
+            return true;
         }
         teams.applyRank(player, team);
         player.sendMessage(Component.text("You joined ", NamedTextColor.GREEN)
@@ -200,7 +203,7 @@ public final class FacilityPlugin extends JavaPlugin {
     }
 
     private void openTeams(Player player) {
-        bookMenu.openTeams(player);
+        dialogMenu.openTeams(player);
     }
 
     // --- tab completion -----------------------------------------------------

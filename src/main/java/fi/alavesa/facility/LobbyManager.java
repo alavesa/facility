@@ -39,15 +39,15 @@ public final class LobbyManager implements Listener {
 
     private final FacilityPlugin plugin;
     private final PlayerStore store;
-    private final BookMenu bookMenu;
+    private final DialogMenu dialogMenu;
 
     /** Players who have Continued this session and shouldn't be re-locked. */
     private final Set<UUID> continued = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
-    public LobbyManager(FacilityPlugin plugin, PlayerStore store, BookMenu bookMenu) {
+    public LobbyManager(FacilityPlugin plugin, PlayerStore store, DialogMenu dialogMenu) {
         this.plugin = plugin;
         this.store = store;
-        this.bookMenu = bookMenu;
+        this.dialogMenu = dialogMenu;
     }
 
     // --- join / quit --------------------------------------------------------
@@ -96,29 +96,11 @@ public final class LobbyManager implements Listener {
         openMainMenu(player);
     }
 
-    /** Open the custom main menu (our own written-book GUI). */
+    /** Open the custom main menu (a native /dialog GUI). The dialog itself is
+     *  un-escapable ({@code can_close_with_escape:false}), so it is the lobby
+     *  lock - no movement guard needed. */
     public void openMainMenu(Player player) {
-        bookMenu.openMain(player);
-    }
-
-    /**
-     * A book can be dismissed with Escape (unlike a container, which we could
-     * force to reopen). So while a player is still locked (not Continued) and in
-     * spectator, any movement means they closed the book and are drifting - snap
-     * them back to the vantage and reopen it. Reopening re-locks their input, so
-     * this fires at most once per escape attempt, not every tick.
-     */
-    @EventHandler(ignoreCancelled = true)
-    public void onMove(org.bukkit.event.player.PlayerMoveEvent event) {
-        Player player = event.getPlayer();
-        if (continued.contains(player.getUniqueId())) return;
-        if (player.getGameMode() != GameMode.SPECTATOR) return;
-        if (event.getTo() == null || (event.getFrom().getBlockX() == event.getTo().getBlockX()
-            && event.getFrom().getBlockY() == event.getTo().getBlockY()
-            && event.getFrom().getBlockZ() == event.getTo().getBlockZ())) return;
-        Location vantage = lobbyVantage(player);
-        if (vantage != null) player.teleport(vantage);
-        openMainMenu(player);
+        dialogMenu.openMain(player);
     }
 
     /**

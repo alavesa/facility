@@ -19,6 +19,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
@@ -64,6 +65,10 @@ public final class LobbyManager implements Listener {
     /** Looping main-menu music tasks, keyed by player (one per player in menu). */
     private final Map<UUID, BukkitTask> musicTasks = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Players who joined and still need the menu opened once their client is
+     *  ready (opened on the resource-pack status, or a timed fallback). */
+    private final Set<UUID> pendingMenu = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
     private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
@@ -85,10 +90,34 @@ public final class LobbyManager implements Listener {
         if (!inCctv(player) && player.getGameMode() != GameMode.CREATIVE) {
             player.setGameMode(GameMode.SPECTATOR);
         }
-        // ...but open the dialog ~1s later. A dialog shown in the first couple of
-        // ticks after join is dropped before the client is ready to render it -
-        // that was why the menu "didn't reappear" on rejoin.
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> lock(player), 20L);
+        // ...but open the dialog only once the client is READY. A dialog shown
+        // mid-load (resource-pack download, ViaVersion, LuckPerms login) is
+        // silently dropped - that's why it "didn't open on join" while /menu did.
+        // We open it on the resource-pack status (client past loading), with a
+        // ~5s timed fallback for clients that never send an RP status.
+        pendingMenu.add(player.getUniqueId());
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> tryOpenJoinMenu(player), 100L);
+    }
+
+    /** The client finished (or refused) the resource pack - it's now in the world
+     *  and ready for a dialog. Open the pending join menu, once. */
+    @EventHandler
+    public void onResourcePack(PlayerResourcePackStatusEvent event) {
+        PlayerResourcePackStatusEvent.Status st = event.getStatus();
+        if (st == PlayerResourcePackStatusEvent.Status.ACCEPTED
+            || st == PlayerResourcePackStatusEvent.Status.DOWNLOADED) return;   // not terminal yet
+        Player player = event.getPlayer();
+        if (!pendingMenu.contains(player.getUniqueId())) return;
+        // a short settle delay after the RP phase, then open
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> tryOpenJoinMenu(player), 10L);
+    }
+
+    /** Open the join menu exactly once, whichever trigger (RP status or the timed
+     *  fallback) gets here first. */
+    private void tryOpenJoinMenu(Player player) {
+        if (!pendingMenu.remove(player.getUniqueId())) return;   // already opened, or gone
+        if (!player.isOnline()) return;
+        lock(player);
     }
 
     @EventHandler
@@ -96,6 +125,7 @@ public final class LobbyManager implements Listener {
         Player player = event.getPlayer();
         cancelReentry(player, null);
         stopMusic(player);
+        pendingMenu.remove(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())

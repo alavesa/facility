@@ -1,0 +1,47 @@
+{
+  "providers": [
+    {
+      "type": "space",
+      "advances": {
+        "": 2,
+        "": -112
+      }
+    },
+    {
+      "type": "bitmap",
+      "file": "facility:font/btn_play.png",
+      "ascent": 13,
+      "height": 18,
+      "chars": [
+        ""
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "facility:font/btn_play_h.png",
+      "ascent": 13,
+      "height": 18,
+      "chars": [
+        ""
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "facility:font/btn_team.png",
+      "ascent": 13,
+      "height": 18,
+      "chars": [
+        ""
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "facility:font/btn_team_h.png",
+      "ascent": 13,
+      "height": 18,
+      "chars": [
+        ""
+      ]
+    }
+  ]
+}

@@ -34,7 +34,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private PlayerStore store;
     private TeamManager teams;
     private LobbyManager lobby;
-    private FallbackMenu fallback;
+    private BookMenu bookMenu;
     private CombatLogListener combat;
 
     private NamespacedKey teamKey;
@@ -48,11 +48,10 @@ public final class FacilityPlugin extends JavaPlugin {
         teams = new TeamManager(this);
         teams.load();
 
-        fallback = new FallbackMenu(this, teams);
-        lobby = new LobbyManager(this, store, fallback);
+        bookMenu = new BookMenu(teams);
+        lobby = new LobbyManager(this, store, bookMenu);
         combat = new CombatLogListener(this, store);
 
-        getServer().getPluginManager().registerEvents(fallback, this);
         getServer().getPluginManager().registerEvents(lobby, this);
         getServer().getPluginManager().registerEvents(combat, this);
         // The countdown bar ticks every 5 ticks (4 Hz) for smooth drain.
@@ -176,6 +175,8 @@ public final class FacilityPlugin extends JavaPlugin {
             .append(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
                 .legacyAmpersand().deserialize(team.display()))
             .append(Component.text(".", NamedTextColor.GREEN)));
+        // Back to the main menu so they can press PLAY to leave spectator.
+        lobby.openMainMenu(player);
         return true;
     }
 
@@ -199,7 +200,7 @@ public final class FacilityPlugin extends JavaPlugin {
     }
 
     private void openTeams(Player player) {
-        fallback.openTeams(player);
+        bookMenu.openTeams(player);
     }
 
     // --- tab completion -----------------------------------------------------

@@ -72,9 +72,6 @@ public final class LobbyManager implements Listener {
     /** Per-player "re-show the join menu until it lands" loop tasks. */
     private final Map<UUID, BukkitTask> joinNags = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Players who rejoined DEAD (e.g. combat-logged): Minecraft shows them the
-     *  respawn screen, so we hold the menu until they press Respawn. */
-    private final Set<UUID> menuAfterRespawn = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
@@ -98,39 +95,46 @@ public final class LobbyManager implements Listener {
         continued.remove(id);   // every session starts locked
         // Exempt sessions (CCTV / creative) never get the lobby.
         if (inCctv(player) || player.getGameMode() == GameMode.CREATIVE) return;
-        // Rejoined DEAD (a combat-log kill, or died then quit)? The client shows
-        // the vanilla respawn screen, which fights the dialog. Hold the menu until
-        // they press Respawn (see onRespawn) - don't touch them now.
-        if (player.isDead() || player.getHealth() <= 0.0 || store.pendingCombatDeath(id) != null) {
-            menuAfterRespawn.add(id);
-            return;
-        }
         beginMenu(player);
     }
 
-    /** Freeze into spectator at the vantage and re-show the dialog until it lands
-     *  (a dialog shown mid-load is silently dropped, so we re-send on a loop
-     *  until the client is ready and the player presses PLAY, clearing pending). */
+    /**
+     * Put the player into the lobby menu, robust to BOTH problems that kept
+     * breaking it: (1) a dialog shown mid-load (resource pack / ViaVersion /
+     * LuckPerms login) is silently dropped, and (2) a combat-log rejoin lands on
+     * the vanilla respawn screen. A once-per-second loop WAITS while the player
+     * is dead or health<=0 (respawn screen), then - the first tick they're alive
+     * and ready - locks them into spectator and re-sends the dialog a few times
+     * so it can't be missed. It stops when they press PLAY (pending cleared).
+     */
     private void beginMenu(Player player) {
         UUID id = player.getUniqueId();
         if (!player.isOnline() || continued.contains(id)) return;
-        player.setGameMode(GameMode.SPECTATOR);
-        Location vantage = lobbyVantage(player);
-        if (vantage != null) player.teleport(vantage);
         pendingMenu.add(id);
-        startMusic(player);
         cancelNag(id);   // never stack two nags
         BukkitTask nag = new org.bukkit.scheduler.BukkitRunnable() {
-            int tries = 0;
+            int waited = 0, shows = 0;
+            boolean locked = false;
             @Override public void run() {
-                if (!player.isOnline() || !pendingMenu.contains(id) || tries++ >= 15) {
-                    cancelNag(id);
+                if (!player.isOnline() || !pendingMenu.contains(id)) { cancelNag(id); return; }
+                // On the respawn screen? wait (up to ~5 min) - never draw over it.
+                if (player.isDead() || player.getHealth() <= 0.0) {
+                    if (waited++ > 300) cancelNag(id);
                     return;
                 }
-                if (player.getGameMode() != GameMode.SPECTATOR) player.setGameMode(GameMode.SPECTATOR);
+                if (!locked) {                       // first alive tick: lock in
+                    player.setGameMode(GameMode.SPECTATOR);
+                    Location vantage = lobbyVantage(player);
+                    if (vantage != null) player.teleport(vantage);
+                    startMusic(player);
+                    locked = true;
+                } else if (player.getGameMode() != GameMode.SPECTATOR) {
+                    player.setGameMode(GameMode.SPECTATOR);
+                }
                 openMainMenu(player);
+                if (shows++ >= 10) cancelNag(id);    // shown enough times; it's up
             }
-        }.runTaskTimer(plugin, 20L, 40L);   // first at 1s, then every 2s, up to ~30s
+        }.runTaskTimer(plugin, 20L, 20L);   // check every second
         joinNags.put(id, nag);
     }
 
@@ -146,7 +150,6 @@ public final class LobbyManager implements Listener {
         stopMusic(player);
         pendingMenu.remove(player.getUniqueId());
         cancelNag(player.getUniqueId());
-        menuAfterRespawn.remove(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())
@@ -166,12 +169,6 @@ public final class LobbyManager implements Listener {
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
-        // Rejoined dead and just pressed Respawn: NOW open the menu. The respawn
-        // screen is gone and the client is ready, so it shows cleanly.
-        if (menuAfterRespawn.remove(id)) {
-            plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 10L);
-            return;
-        }
         if (continued.contains(id)) return;   // already in-world: leave them be
         continued.add(id);
     }

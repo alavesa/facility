@@ -104,6 +104,15 @@ public final class FacilityPlugin extends JavaPlugin {
             case "continue" -> {
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                // Can't PLAY until a valid team has been chosen - route them to
+                // the selector instead of letting them into the world team-less.
+                String teamId = store.getTeam(player.getUniqueId());
+                if (teamId == null || teams.get(teamId) == null) {
+                    player.sendMessage(Component.text("Choose a team before you deploy.",
+                        NamedTextColor.RED));
+                    openTeams(player);
+                    return true;
+                }
                 lobby.continueInto(player);
                 return true;
             }

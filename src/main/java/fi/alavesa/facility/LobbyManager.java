@@ -104,20 +104,30 @@ public final class LobbyManager implements Listener {
         continued.add(player.getUniqueId());
     }
 
-    /** Freeze the player at the lobby vantage in spectator and open the menu. */
+    /**
+     * The AUTOMATIC join-lock. Applies the exemptions: never hijack a Terminal
+     * CCTV session, a creative session, or (unless configured) an op - those
+     * players skip the lobby entirely. Everyone else is force-locked.
+     */
     private void lock(Player player) {
         if (!player.isOnline() || continued.contains(player.getUniqueId())) return;
-        // Never hijack a Terminal CCTV session or an admin's creative session,
-        // and (unless configured) never lock an op.
         if (inCctv(player)) return;
+        // Creative sessions (builders/admins mid-work) are never locked; everyone
+        // else - ops included - goes through the lobby and just presses PLAY.
         if (player.getGameMode() == GameMode.CREATIVE) {
             continued.add(player.getUniqueId());   // treat as already in-world
             return;
         }
-        if (player.isOp() && !plugin.getConfig().getBoolean("menu.lock-ops", false)) {
-            continued.add(player.getUniqueId());
-            return;
-        }
+        forceLock(player);
+    }
+
+    /**
+     * Actually put the player in the menu: spectator, at the vantage, dialog
+     * open. No exemptions - this is what an EXPLICIT /menu runs, so it works for
+     * ops and everyone else. (CCTV is still refused upstream in returnToMenu.)
+     */
+    private void forceLock(Player player) {
+        if (!player.isOnline()) return;
         player.setGameMode(GameMode.SPECTATOR);
         Location vantage = lobbyVantage(player);
         if (vantage != null) player.teleport(vantage);
@@ -210,7 +220,9 @@ public final class LobbyManager implements Listener {
         if (inCctv(player)) return;   // defensive: never re-lock over CCTV
         if (player.getGameMode() != GameMode.SPECTATOR) store.saveLogout(player);
         continued.remove(player.getUniqueId());
-        lock(player);
+        // Explicit /menu bypasses the op/creative auto-lock exemptions: if you
+        // asked for the menu, you get it, whoever you are.
+        forceLock(player);
     }
 
     // --- continue -----------------------------------------------------------

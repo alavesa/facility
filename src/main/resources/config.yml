@@ -44,6 +44,23 @@ menu:
     - {type: button, label: "&a&l▶ PLAY", action: "facility continue"}
     - {type: button, label: "&bSELECT TEAM", action: "facility teams"}
 
+# Facility-wide BLACKOUT (/facility blackout on|off|toggle [seconds]).
+# When engaged, every WAXED COPPER TRAPDOOR that is a light fixture (TOP half,
+# facing WEST or EAST) is switched to powered=false, and every minecraft:light
+# block within `light-radius` of such a fixture is removed - the site goes dark.
+# Ending the blackout restores every trapdoor and light exactly. The scan only
+# touches LOADED chunks and is spread over ticks so it never freezes the server.
+#   world     - blank = every world; or a single world name to limit the scan
+#   min-y/max-y - the height band to scan (keep it to the facility for speed)
+#   light-radius - how far around each fixture to strip minecraft:light blocks
+#   chunks-per-tick - scan speed (higher = faster cascade, more work per tick)
+blackout:
+  world: ""
+  min-y: 0
+  max-y: 128
+  light-radius: 2
+  chunks-per-tick: 4
+
 # Teams. Joining a team ACTUALLY confers three things, applied through
 # LuckPerms when the player picks it:
 #   rank        - the LuckPerms group the player is put into (the group is

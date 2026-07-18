@@ -38,6 +38,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private CombatLogListener combat;
     private MenuStore menuStore;
     private MenuEditor menuEditor;
+    private BlackoutManager blackout;
 
     private NamespacedKey teamKey;
 
@@ -55,6 +56,7 @@ public final class FacilityPlugin extends JavaPlugin {
         lobby = new LobbyManager(this, store, dialogMenu);
         combat = new CombatLogListener(this, store);
         menuEditor = new MenuEditor(this, menuStore);
+        blackout = new BlackoutManager(this);
 
         getServer().getPluginManager().registerEvents(lobby, this);
         getServer().getPluginManager().registerEvents(combat, this);
@@ -74,6 +76,7 @@ public final class FacilityPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (blackout != null && blackout.isActive()) blackout.end();   // restore lights
         if (combat != null) combat.shutdown();
         // TextDisplay holograms are entities and despawn/expire on their own;
         // nothing persistent to clean beyond the boss bars above.
@@ -133,6 +136,24 @@ public final class FacilityPlugin extends JavaPlugin {
             }
             case "menu" -> {
                 return handleMenu(sender, args);
+            }
+            case "blackout" -> {
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "toggle";
+                int seconds = 0;
+                if (args.length >= 3) {
+                    try { seconds = Math.max(0, Integer.parseInt(args[2])); }
+                    catch (NumberFormatException e) { return error(sender, "Seconds must be a number."); }
+                }
+                switch (sub) {
+                    case "on" -> { blackout.start(seconds); }
+                    case "off" -> { blackout.end(); }
+                    default -> { blackout.toggle(seconds); }
+                }
+                sender.sendMessage(Component.text("Blackout " + (blackout.isActive() ? "ENGAGED" : "lifted")
+                    + (blackout.isActive() && seconds > 0 ? " for " + seconds + "s" : "") + ".",
+                    NamedTextColor.AQUA));
+                return true;
             }
             default -> {
                 return usage(sender);
@@ -347,7 +368,7 @@ public final class FacilityPlugin extends JavaPlugin {
         return switch (args.length) {
             case 1 -> {
                 List<String> top = new ArrayList<>(List.of("continue", "teams", "team"));
-                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu"));
+                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
@@ -360,6 +381,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 case "grant", "revoke" -> filter(online(), args[1]);
                 case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
                     "move", "setlabel", "setaction"), args[1]) : List.of();
+                case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {

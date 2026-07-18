@@ -19,7 +19,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
@@ -65,9 +64,11 @@ public final class LobbyManager implements Listener {
     /** Looping main-menu music tasks, keyed by player (one per player in menu). */
     private final Map<UUID, BukkitTask> musicTasks = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Players who joined and still need the menu opened once their client is
-     *  ready (opened on the resource-pack status, or a timed fallback). */
+    /** Players who joined and still need the menu (until they press PLAY). */
     private final Set<UUID> pendingMenu = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /** Per-player "re-show the join menu until it lands" loop tasks. */
+    private final Map<UUID, BukkitTask> joinNags = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
@@ -84,40 +85,38 @@ public final class LobbyManager implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        continued.remove(player.getUniqueId());   // every session starts locked
-        // Swiftly freeze the arrival: spectator IMMEDIATELY (unless exempt) so
-        // they can't move/act while the client settles...
-        if (!inCctv(player) && player.getGameMode() != GameMode.CREATIVE) {
-            player.setGameMode(GameMode.SPECTATOR);
-        }
-        // ...but open the dialog only once the client is READY. A dialog shown
-        // mid-load (resource-pack download, ViaVersion, LuckPerms login) is
-        // silently dropped - that's why it "didn't open on join" while /menu did.
-        // We open it on the resource-pack status (client past loading), with a
-        // ~5s timed fallback for clients that never send an RP status.
-        pendingMenu.add(player.getUniqueId());
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> tryOpenJoinMenu(player), 100L);
+        UUID id = player.getUniqueId();
+        continued.remove(id);   // every session starts locked
+        // Exempt sessions (CCTV / creative) never get the lobby.
+        if (inCctv(player) || player.getGameMode() == GameMode.CREATIVE) return;
+        // Freeze them instantly...
+        player.setGameMode(GameMode.SPECTATOR);
+        Location vantage = lobbyVantage(player);
+        if (vantage != null) player.teleport(vantage);
+        pendingMenu.add(id);
+        startMusic(player);
+        // ...but a dialog shown before the client finishes loading (resource
+        // pack, ViaVersion, LuckPerms login) is silently DROPPED - that was why
+        // the menu never opened on join while /menu (run later) did. We can't
+        // know exactly when the client is ready, so RE-SEND the dialog on a short
+        // loop until it lands and the player presses PLAY (which clears pending).
+        BukkitTask nag = new org.bukkit.scheduler.BukkitRunnable() {
+            int tries = 0;
+            @Override public void run() {
+                if (!player.isOnline() || !pendingMenu.contains(id) || tries++ >= 15) {
+                    cancelNag(id);
+                    return;
+                }
+                if (player.getGameMode() != GameMode.SPECTATOR) player.setGameMode(GameMode.SPECTATOR);
+                openMainMenu(player);   // re-send; harmless once it's up, until they PLAY
+            }
+        }.runTaskTimer(plugin, 20L, 40L);   // first at 1s, then every 2s, up to ~30s
+        joinNags.put(id, nag);
     }
 
-    /** The client finished (or refused) the resource pack - it's now in the world
-     *  and ready for a dialog. Open the pending join menu, once. */
-    @EventHandler
-    public void onResourcePack(PlayerResourcePackStatusEvent event) {
-        PlayerResourcePackStatusEvent.Status st = event.getStatus();
-        if (st == PlayerResourcePackStatusEvent.Status.ACCEPTED
-            || st == PlayerResourcePackStatusEvent.Status.DOWNLOADED) return;   // not terminal yet
-        Player player = event.getPlayer();
-        if (!pendingMenu.contains(player.getUniqueId())) return;
-        // a short settle delay after the RP phase, then open
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> tryOpenJoinMenu(player), 10L);
-    }
-
-    /** Open the join menu exactly once, whichever trigger (RP status or the timed
-     *  fallback) gets here first. */
-    private void tryOpenJoinMenu(Player player) {
-        if (!pendingMenu.remove(player.getUniqueId())) return;   // already opened, or gone
-        if (!player.isOnline()) return;
-        lock(player);
+    private void cancelNag(UUID id) {
+        BukkitTask task = joinNags.remove(id);
+        if (task != null) task.cancel();
     }
 
     @EventHandler
@@ -126,6 +125,7 @@ public final class LobbyManager implements Listener {
         cancelReentry(player, null);
         stopMusic(player);
         pendingMenu.remove(player.getUniqueId());
+        cancelNag(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())
@@ -322,6 +322,8 @@ public final class LobbyManager implements Listener {
     /** The Continue button lands here. Return them to the world and unlock. */
     public void continueInto(Player player) {
         cancelReentry(player, null);
+        pendingMenu.remove(player.getUniqueId());   // stop the join re-show loop
+        cancelNag(player.getUniqueId());
         stopMusic(player);
         continued.add(player.getUniqueId());
         player.closeInventory();

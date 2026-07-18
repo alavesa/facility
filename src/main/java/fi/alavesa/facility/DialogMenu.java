@@ -44,10 +44,12 @@ public final class DialogMenu {
      *  needs in-game screenshot tuning). 0 = panel starts at the rewind point. */
     private static final int BG_NUDGE_COUNT = 0;
 
+    private final FacilityPlugin plugin;
     private final TeamManager teams;
     private final MenuStore menu;
 
-    public DialogMenu(TeamManager teams, MenuStore menu) {
+    public DialogMenu(FacilityPlugin plugin, TeamManager teams, MenuStore menu) {
+        this.plugin = plugin;
         this.teams = teams;
         this.menu = menu;
     }
@@ -76,21 +78,22 @@ public final class DialogMenu {
      *  elements become body lines, BUTTON elements become action buttons. A
      *  malformed element can never appear here (MenuStore skips them). */
     private String mainDialog() {
-        StringBuilder body = new StringBuilder();
-        // The background glyph is the first body line, behind everything else.
-        body.append(bgBodyElement());
-
+        java.util.List<String> body = new java.util.ArrayList<>();
+        // The custom background is opt-out: if the menu ever fails to render,
+        // flip menu.background.enabled to false to rule the glyph in or out.
+        if (plugin.getConfig().getBoolean("menu.background.enabled", true)) {
+            body.add(bgBodyElement());
+        }
         StringBuilder actions = new StringBuilder();
         for (MenuElement el : menu.elements()) {
             if (el.type() == MenuElement.Type.TEXT) {
-                body.append(",{type:\"minecraft:plain_message\",contents:")
-                    .append(json(legacy(el.label()))).append("}");
+                body.add("{type:\"minecraft:plain_message\",contents:" + json(legacy(el.label())) + "}");
             } else {
                 if (actions.length() > 0) actions.append(",");
                 actions.append(button(legacy(el.label()), el.action()));
             }
         }
-        return dialog("SITE-19 // MAIN MENU", body.toString(), actions.toString());
+        return dialog("SITE-19 // MAIN MENU", String.join(",", body), actions.toString());
     }
 
     private String teamsDialog(Player player) {

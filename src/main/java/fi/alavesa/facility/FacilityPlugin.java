@@ -52,7 +52,7 @@ public final class FacilityPlugin extends JavaPlugin {
         teams.load();
 
         menuStore = new MenuStore(this);
-        dialogMenu = new DialogMenu(teams, menuStore);
+        dialogMenu = new DialogMenu(this, teams, menuStore);
         lobby = new LobbyManager(this, store, dialogMenu);
         combat = new CombatLogListener(this, store);
         menuEditor = new MenuEditor(this, menuStore);

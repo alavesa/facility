@@ -72,6 +72,10 @@ public final class LobbyManager implements Listener {
     /** Per-player "re-show the join menu until it lands" loop tasks. */
     private final Map<UUID, BukkitTask> joinNags = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Players who rejoined DEAD (e.g. combat-logged): Minecraft shows them the
+     *  respawn screen, so we hold the menu until they press Respawn. */
+    private final Set<UUID> menuAfterRespawn = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
     private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
@@ -94,17 +98,28 @@ public final class LobbyManager implements Listener {
         continued.remove(id);   // every session starts locked
         // Exempt sessions (CCTV / creative) never get the lobby.
         if (inCctv(player) || player.getGameMode() == GameMode.CREATIVE) return;
-        // Freeze them instantly...
+        // Rejoined DEAD (a combat-log kill, or died then quit)? The client shows
+        // the vanilla respawn screen, which fights the dialog. Hold the menu until
+        // they press Respawn (see onRespawn) - don't touch them now.
+        if (player.isDead() || player.getHealth() <= 0.0 || store.pendingCombatDeath(id) != null) {
+            menuAfterRespawn.add(id);
+            return;
+        }
+        beginMenu(player);
+    }
+
+    /** Freeze into spectator at the vantage and re-show the dialog until it lands
+     *  (a dialog shown mid-load is silently dropped, so we re-send on a loop
+     *  until the client is ready and the player presses PLAY, clearing pending). */
+    private void beginMenu(Player player) {
+        UUID id = player.getUniqueId();
+        if (!player.isOnline() || continued.contains(id)) return;
         player.setGameMode(GameMode.SPECTATOR);
         Location vantage = lobbyVantage(player);
         if (vantage != null) player.teleport(vantage);
         pendingMenu.add(id);
         startMusic(player);
-        // ...but a dialog shown before the client finishes loading (resource
-        // pack, ViaVersion, LuckPerms login) is silently DROPPED - that was why
-        // the menu never opened on join while /menu (run later) did. We can't
-        // know exactly when the client is ready, so RE-SEND the dialog on a short
-        // loop until it lands and the player presses PLAY (which clears pending).
+        cancelNag(id);   // never stack two nags
         BukkitTask nag = new org.bukkit.scheduler.BukkitRunnable() {
             int tries = 0;
             @Override public void run() {
@@ -113,7 +128,7 @@ public final class LobbyManager implements Listener {
                     return;
                 }
                 if (player.getGameMode() != GameMode.SPECTATOR) player.setGameMode(GameMode.SPECTATOR);
-                openMainMenu(player);   // re-send; harmless once it's up, until they PLAY
+                openMainMenu(player);
             }
         }.runTaskTimer(plugin, 20L, 40L);   // first at 1s, then every 2s, up to ~30s
         joinNags.put(id, nag);
@@ -131,6 +146,7 @@ public final class LobbyManager implements Listener {
         stopMusic(player);
         pendingMenu.remove(player.getUniqueId());
         cancelNag(player.getUniqueId());
+        menuAfterRespawn.remove(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())
@@ -149,8 +165,15 @@ public final class LobbyManager implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        if (continued.contains(player.getUniqueId())) return;   // already in-world: leave them be
-        continued.add(player.getUniqueId());
+        UUID id = player.getUniqueId();
+        // Rejoined dead and just pressed Respawn: NOW open the menu. The respawn
+        // screen is gone and the client is ready, so it shows cleanly.
+        if (menuAfterRespawn.remove(id)) {
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 10L);
+            return;
+        }
+        if (continued.contains(id)) return;   // already in-world: leave them be
+        continued.add(id);
     }
 
     /** Respawn at your team's spawn, if it has one. */

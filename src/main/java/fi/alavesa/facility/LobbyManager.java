@@ -5,14 +5,12 @@ import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.sound.SoundStop;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -22,9 +20,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Transformation;
-import org.joml.AxisAngle4f;
-import org.joml.Vector3f;
 
 import java.util.Map;
 import java.util.Set;
@@ -111,30 +106,25 @@ public final class LobbyManager implements Listener {
         UUID id = player.getUniqueId();
         if (!player.isOnline() || continued.contains(id)) return;
         pendingMenu.add(id);
-        cancelNag(id);   // never stack two nags
+        cancelNag(id);   // never stack two waiters
+        // Wait (WITHOUT drawing anything) until the player is off the vanilla
+        // respawn screen, then open the dialog ONCE. Dying / combat-logging thus
+        // lets the player press Respawn first; and showing once means no console
+        // spam and no re-opening flicker that made the menu unusable. The ~60s
+        // cap is only a safety net against a mis-read dead state.
         BukkitTask nag = new org.bukkit.scheduler.BukkitRunnable() {
-            int waited = 0, shows = 0;
-            boolean locked = false;
+            int waited = 0;
             @Override public void run() {
                 if (!player.isOnline() || !pendingMenu.contains(id)) { cancelNag(id); return; }
-                // On the respawn screen? wait (up to ~5 min) - never draw over it.
-                if (player.isDead() || player.getHealth() <= 0.0) {
-                    if (waited++ > 300) cancelNag(id);
-                    return;
-                }
-                if (!locked) {                       // first alive tick: lock in
-                    player.setGameMode(GameMode.SPECTATOR);
-                    Location vantage = lobbyVantage(player);
-                    if (vantage != null) player.teleport(vantage);
-                    startMusic(player);
-                    locked = true;
-                } else if (player.getGameMode() != GameMode.SPECTATOR) {
-                    player.setGameMode(GameMode.SPECTATOR);
-                }
-                openMainMenu(player);
-                if (shows++ >= 10) cancelNag(id);    // shown enough times; it's up
+                if (player.isDead() && waited++ < 60) return;   // let them press Respawn first
+                player.setGameMode(GameMode.SPECTATOR);
+                Location vantage = lobbyVantage(player);
+                if (vantage != null) player.teleport(vantage);
+                startMusic(player);
+                openMainMenu(player);   // exactly once
+                cancelNag(id);
             }
-        }.runTaskTimer(plugin, 20L, 20L);   // check every second
+        }.runTaskTimer(plugin, 20L, 10L);   // ~1s to settle, then the single show
         joinNags.put(id, nag);
     }
 
@@ -168,9 +158,11 @@ public final class LobbyManager implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
-        UUID id = player.getUniqueId();
-        if (continued.contains(id)) return;   // already in-world: leave them be
-        continued.add(id);
+        if (inCctv(player)) return;   // don't hijack a CCTV session
+        // The player pressed Respawn after dying (or a combat-log kill): send
+        // them to the main menu now that the respawn screen is gone.
+        continued.remove(player.getUniqueId());
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 2L);
     }
 
     /** Respawn at your team's spawn, if it has one. */
@@ -393,14 +385,9 @@ public final class LobbyManager implements Listener {
         player.teleport(target);
 
         player.sendMessage(Component.text("Welcome to Site-19. Stay sharp.", NamedTextColor.AQUA));
-
-        // Show any pending combat-log death as a hologram once they land.
-        String pending = store.pendingCombatDeath(player.getUniqueId());
-        if (pending != null) {
-            store.clearPendingCombatDeath(player.getUniqueId());
-            plugin.getServer().getScheduler().runTaskLater(plugin,
-                () -> spawnDeathHologram(player, pending), 10L);
-        }
+        // The vanilla respawn screen already shows the death reason, so there's
+        // no combat-log death hologram anymore - just clear any stale record.
+        store.clearPendingCombatDeath(player.getUniqueId());
     }
 
     public boolean hasContinued(UUID id) {
@@ -437,49 +424,5 @@ public final class LobbyManager implements Listener {
             plugin.getConfig().getDouble("lobby.z", 0.5),
             (float) plugin.getConfig().getDouble("lobby.yaw", 0.0),
             (float) plugin.getConfig().getDouble("lobby.pitch", 0.0));
-    }
-
-    // --- combat-log rejoin hologram ----------------------------------------
-
-    /**
-     * Float a TextDisplay a couple of blocks ahead of the player at eye level,
-     * facing them, showing their combat-log death message. It self-destructs
-     * after ~10s or when they walk away.
-     */
-    private void spawnDeathHologram(Player player, String deathMessage) {
-        if (!player.isOnline()) return;
-        Location eye = player.getEyeLocation();
-        Location spot = eye.clone().add(eye.getDirection().normalize().multiply(2.0));
-
-        Component text = Component.text()
-            .append(LegacyComponentSerializer.legacyAmpersand().deserialize("&c" + deathMessage))
-            .append(Component.newline())
-            .append(Component.text("Combat logged", NamedTextColor.GRAY))
-            .build();
-
-        World world = spot.getWorld();
-        TextDisplay display = world.spawn(spot, TextDisplay.class, td -> {
-            td.text(text);
-            td.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);   // always faces the viewer
-            td.setSeeThrough(true);
-            td.setShadowed(true);
-            td.setDefaultBackground(false);
-            td.setBackgroundColor(org.bukkit.Color.fromARGB(160, 0, 0, 0));
-            td.setTransformation(new Transformation(
-                new Vector3f(), new AxisAngle4f(), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
-        });
-
-        Location anchor = player.getLocation().clone();
-        final int[] ticks = {0};
-        plugin.getServer().getScheduler().runTaskTimer(plugin, task -> {
-            ticks[0] += 5;
-            boolean gone = !display.isValid();
-            boolean movedAway = !player.isOnline()
-                || player.getLocation().distanceSquared(anchor) > 16.0;   // ~4 blocks
-            if (gone || movedAway || ticks[0] >= 200) {   // 200 ticks = 10s
-                if (display.isValid()) display.remove();
-                task.cancel();
-            }
-        }, 5L, 5L);
     }
 }

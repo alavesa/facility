@@ -61,8 +61,13 @@ public final class DialogMenu {
     }
 
     private void show(Player player, String snbt) {
-        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+        boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
             "dialog show " + player.getName() + " " + snbt);
+        if (!ok) {
+            Bukkit.getLogger().warning("[Facility] 'dialog show' failed for " + player.getName()
+                + " - does this server support the /dialog command (MC 1.21.6+)? The menu can't open."
+                + " If /dialog is missing or the schema differs on your build, tell the developer.");
+        }
     }
 
     // --- dialog builders ----------------------------------------------------

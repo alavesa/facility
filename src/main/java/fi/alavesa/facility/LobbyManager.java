@@ -81,12 +81,14 @@ public final class LobbyManager implements Listener {
         Player player = event.getPlayer();
         continued.remove(player.getUniqueId());   // every session starts locked
         // Swiftly freeze the arrival: spectator IMMEDIATELY (unless exempt) so
-        // they can't move/act while the client settles, then open the menu a
-        // couple of ticks later once other join handlers have run.
+        // they can't move/act while the client settles...
         if (!inCctv(player) && player.getGameMode() != GameMode.CREATIVE) {
             player.setGameMode(GameMode.SPECTATOR);
         }
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> lock(player), 2L);
+        // ...but open the dialog ~1s later. A dialog shown in the first couple of
+        // ticks after join is dropped before the client is ready to render it -
+        // that was why the menu "didn't reappear" on rejoin.
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> lock(player), 20L);
     }
 
     @EventHandler

@@ -54,6 +54,8 @@ public final class LobbyManager implements Listener {
     private final FacilityPlugin plugin;
     private final PlayerStore store;
     private final DialogMenu dialogMenu;
+    private final TeamManager teams;
+    private final CombatLogListener combat;
 
     /** Players who have Continued this session and shouldn't be re-locked. */
     private final Set<UUID> continued = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
@@ -74,10 +76,13 @@ public final class LobbyManager implements Listener {
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
     private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
 
-    public LobbyManager(FacilityPlugin plugin, PlayerStore store, DialogMenu dialogMenu) {
+    public LobbyManager(FacilityPlugin plugin, PlayerStore store, DialogMenu dialogMenu,
+                        TeamManager teams, CombatLogListener combat) {
         this.plugin = plugin;
         this.store = store;
         this.dialogMenu = dialogMenu;
+        this.teams = teams;
+        this.combat = combat;
     }
 
     // --- join / quit --------------------------------------------------------
@@ -146,6 +151,15 @@ public final class LobbyManager implements Listener {
         Player player = event.getPlayer();
         if (continued.contains(player.getUniqueId())) return;   // already in-world: leave them be
         continued.add(player.getUniqueId());
+    }
+
+    /** Respawn at your team's spawn, if it has one. */
+    @EventHandler
+    public void onRespawnTeamSpawn(PlayerRespawnEvent event) {
+        String teamId = store.getTeam(event.getPlayer().getUniqueId());
+        if (teamId == null) return;
+        Location spawn = teams.getSpawn(teamId);
+        if (spawn != null) event.setRespawnLocation(spawn);
     }
 
     /**
@@ -233,6 +247,17 @@ public final class LobbyManager implements Listener {
         dialogMenu.openMain(player);
     }
 
+    /** The team selector's «Back button: go straight back to the main menu with
+     *  NO stand-still hold - the player is already IN the menu (spectator, not
+     *  yet Continued), so there's nothing to evade. Ignored otherwise, so it
+     *  can never trap an in-world player behind the un-closable dialog. */
+    public void reopenMain(Player player) {
+        if (!continued.contains(player.getUniqueId())
+            && player.getGameMode() == GameMode.SPECTATOR) {
+            openMainMenu(player);
+        }
+    }
+
     // --- /menu re-entry: 10-second stand-still hold --------------------------
 
     /**
@@ -247,6 +272,13 @@ public final class LobbyManager implements Listener {
     public void returnToMenu(Player player) {
         if (inCctv(player)) {
             player.sendActionBar(Component.text("Not while jacked into CCTV.", NamedTextColor.RED));
+            return;
+        }
+        // /menu must never be a combat/damage escape: refuse it outright while
+        // combat-tagged (the whole reason the stand-still hold exists).
+        if (combat.isTagged(player.getUniqueId())) {
+            player.sendActionBar(Component.text("You can't return to the menu while in combat.",
+                NamedTextColor.RED));
             return;
         }
         if (continued.contains(player.getUniqueId()) && player.getGameMode() == GameMode.SPECTATOR) {
@@ -328,11 +360,13 @@ public final class LobbyManager implements Listener {
         continued.add(player.getUniqueId());
         player.closeInventory();
 
-        Location dest = store.lastLocation(player.getUniqueId());
-        if (dest == null) {
-            World world = player.getWorld();
-            dest = world.getSpawnLocation();
-        }
+        // Where to drop them: their team's spawn if it has one, else where they
+        // last stood, else world spawn.
+        Location dest = null;
+        String teamId = store.getTeam(player.getUniqueId());
+        if (teamId != null) dest = teams.getSpawn(teamId);
+        if (dest == null) dest = store.lastLocation(player.getUniqueId());
+        if (dest == null) dest = player.getWorld().getSpawnLocation();
         GameMode gm = store.lastGameMode(player.getUniqueId());
         player.setGameMode(gm);
         final Location target = dest;

@@ -41,13 +41,18 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class CombatLogListener implements Listener, Runnable {
 
-    /** Seconds a hit keeps you in combat. */
+    /** Seconds a PLAYER's hit keeps you in combat. */
     public static final int COMBAT_LOG_SECONDS = 15;
+    /** Seconds ANY other damage (mobs, fall, fire, SCP-018, ...) tags you for.
+     *  So being "downed" by anything counts as combat - you can't quietly log
+     *  out and hide behind the lobby menu on rejoin. */
+    public static final int SELF_TAG_SECONDS = 5;
 
     private final FacilityPlugin plugin;
     private final PlayerStore store;
 
     private final Map<UUID, Long> taggedUntil = new ConcurrentHashMap<>();   // ms epoch
+    private final Map<UUID, Integer> tagSeconds = new ConcurrentHashMap<>(); // current tag's length
     private final Map<UUID, UUID> lastAttacker = new ConcurrentHashMap<>();  // victim -> attacker
     private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
 
@@ -58,13 +63,24 @@ public final class CombatLogListener implements Listener, Runnable {
 
     // --- tagging ------------------------------------------------------------
 
+    /** PvP: a player-inflicted hit tags BOTH players for the full 15s. */
     @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
     public void onDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
         Player attacker = resolveAttacker(event);
         if (attacker == null || attacker.equals(victim)) return;
-        tag(victim, attacker);
-        tag(attacker, victim);
+        tag(victim, COMBAT_LOG_SECONDS, attacker);
+        tag(attacker, COMBAT_LOG_SECONDS, victim);
+    }
+
+    /** ANY damage (mobs, fall, fire, SCP-018, ...) tags the victim for the short
+     *  window. Fires for every damage - a PvP hit also hits onDamage above, and
+     *  the longer 15s tag wins (tag() never shortens an existing tag). */
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
+    public void onAnyDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player victim) {
+            tag(victim, SELF_TAG_SECONDS, null);
+        }
     }
 
     /**
@@ -87,10 +103,18 @@ public final class CombatLogListener implements Listener, Runnable {
         return null;   // mob / environmental / non-player projectile: not PvP
     }
 
-    /** Tag (or refresh) the victim, remembering who last hit them. */
-    private void tag(Player victim, Player attacker) {
-        taggedUntil.put(victim.getUniqueId(), System.currentTimeMillis() + COMBAT_LOG_SECONDS * 1000L);
-        lastAttacker.put(victim.getUniqueId(), attacker.getUniqueId());
+    /** Tag the victim for {@code seconds}, never SHORTENING an existing longer
+     *  tag (so a 5s environmental hit can't cut a 15s PvP tag short). Remembers
+     *  the attacker when there is one. */
+    private void tag(Player victim, int seconds, Player attacker) {
+        UUID id = victim.getUniqueId();
+        long newUntil = System.currentTimeMillis() + seconds * 1000L;
+        Long cur = taggedUntil.get(id);
+        if (cur == null || newUntil > cur) {
+            taggedUntil.put(id, newUntil);
+            tagSeconds.put(id, seconds);
+        }
+        if (attacker != null) lastAttacker.put(id, attacker.getUniqueId());
     }
 
     public boolean isTagged(UUID id) {
@@ -119,6 +143,7 @@ public final class CombatLogListener implements Listener, Runnable {
         }
         clearBar(player);
         taggedUntil.remove(id);
+        tagSeconds.remove(id);
         lastAttacker.remove(id);
         plugin.getLogger().info("Combat log: " + player.getName() + " quit while tagged - "
             + "treated as a death (\"" + message + "\").");
@@ -151,6 +176,7 @@ public final class CombatLogListener implements Listener, Runnable {
             long remainingMs = until - now;
             if (remainingMs <= 0) {
                 taggedUntil.remove(id);
+                tagSeconds.remove(id);
                 clearBar(player);
                 continue;
             }
@@ -158,7 +184,8 @@ public final class CombatLogListener implements Listener, Runnable {
             // EXACT legacy string: gray "Combat Log ", dark_gray "| ", dark_red "<n>"
             Component title = LegacyComponentSerializer.legacyAmpersand()
                 .deserialize("&7Combat Log &8| &4" + seconds);
-            float progress = Math.max(0f, Math.min(1f, remainingMs / (COMBAT_LOG_SECONDS * 1000f)));
+            int total = tagSeconds.getOrDefault(id, COMBAT_LOG_SECONDS);
+            float progress = Math.max(0f, Math.min(1f, remainingMs / (total * 1000f)));
 
             BossBar bar = bars.get(id);
             if (bar == null) {

@@ -96,6 +96,21 @@ public final class PlayerStore {
         return file(id).exists();
     }
 
+    // --- selected team ------------------------------------------------------
+
+    /** Remember which team the player last joined (so Continue + respawn can use
+     *  the team's spawn). Survives restart. */
+    public void setTeam(UUID id, String teamId) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("team", teamId);
+        write(id, cfg);
+    }
+
+    /** The player's current team id, or null. */
+    public String getTeam(UUID id) {
+        return read(id).getString("team", null);
+    }
+
     // --- pending combat-log death ------------------------------------------
 
     /** Record a combat-log death message to be shown as a hologram next Continue. */

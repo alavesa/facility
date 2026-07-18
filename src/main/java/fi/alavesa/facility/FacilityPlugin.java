@@ -53,8 +53,8 @@ public final class FacilityPlugin extends JavaPlugin {
 
         menuStore = new MenuStore(this);
         dialogMenu = new DialogMenu(this, teams, menuStore);
-        lobby = new LobbyManager(this, store, dialogMenu);
         combat = new CombatLogListener(this, store);
+        lobby = new LobbyManager(this, store, dialogMenu, teams, combat);
         menuEditor = new MenuEditor(this, menuStore);
         blackout = new BlackoutManager(this);
 
@@ -111,6 +111,14 @@ public final class FacilityPlugin extends JavaPlugin {
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
                 openTeams(player);
+                return true;
+            }
+            case "back" -> {
+                // The team selector's «Back button: reopen the main menu with NO
+                // stand-still hold (the player is already in the menu).
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                lobby.reopenMain(player);
                 return true;
             }
             case "team" -> {
@@ -190,6 +198,17 @@ public final class FacilityPlugin extends JavaPlugin {
                 NamedTextColor.AQUA));
             return true;
         }
+        if (sub.equals("setspawn")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (!(sender instanceof Player admin)) return error(sender, "Players only.");
+            if (args.length < 3) return error(sender, "/facility team setspawn <name>");
+            Team t = teams.get(args[2]);
+            if (t == null) return error(sender, "No team named '" + args[2] + "'.");
+            teams.setSpawn(t.id(), admin.getLocation());
+            sender.sendMessage(Component.text("Spawn for '" + t.id() + "' set to your location. "
+                + "Members arrive + respawn here.", NamedTextColor.AQUA));
+            return true;
+        }
 
         // Otherwise: a player joining a team.
         if (!(sender instanceof Player player)) return error(sender, "Players only.");
@@ -203,6 +222,7 @@ public final class FacilityPlugin extends JavaPlugin {
             return true;
         }
         teams.applyRank(player, team);
+        store.setTeam(player.getUniqueId(), team.id());   // Continue + respawn use its spawn
         player.sendMessage(Component.text("You joined ", NamedTextColor.GREEN)
             .append(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
                 .legacyAmpersand().deserialize(team.display()))
@@ -376,6 +396,7 @@ public final class FacilityPlugin extends JavaPlugin {
                     List<String> opts = new ArrayList<>(teams.ids());
                     opts.add("add");
                     opts.add("remove");
+                    opts.add("setspawn");
                     yield filter(opts.stream(), args[1]);
                 }
                 case "grant", "revoke" -> filter(online(), args[1]);
@@ -385,7 +406,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {
-                case "team" -> args[1].equalsIgnoreCase("remove")
+                case "team" -> (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("setspawn"))
                     ? filter(teams.ids().stream(), args[2]) : List.of();
                 case "grant", "revoke" -> filter(privateTeamIds(), args[2]);
                 case "menu" -> menuArgComplete(args);

@@ -1,7 +1,9 @@
 package fi.alavesa.facility;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 
@@ -123,6 +125,35 @@ public final class TeamManager {
         plugin.saveConfig();
         load();
         return true;
+    }
+
+    // --- team spawns --------------------------------------------------------
+
+    /** Set the team's spawn to a location, persisting. Players who pick this team
+     *  arrive here on Continue and respawn here on death. */
+    public void setSpawn(String teamId, Location loc) {
+        String path = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn";
+        plugin.getConfig().set(path + ".world", loc.getWorld().getName());
+        plugin.getConfig().set(path + ".x", loc.getX());
+        plugin.getConfig().set(path + ".y", loc.getY());
+        plugin.getConfig().set(path + ".z", loc.getZ());
+        plugin.getConfig().set(path + ".yaw", loc.getYaw());
+        plugin.getConfig().set(path + ".pitch", loc.getPitch());
+        plugin.saveConfig();
+    }
+
+    /** The team's spawn, or null if none set / its world is unloaded. */
+    public Location getSpawn(String teamId) {
+        if (teamId == null) return null;
+        String path = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn";
+        if (!plugin.getConfig().contains(path + ".world")) return null;
+        World world = Bukkit.getWorld(plugin.getConfig().getString(path + ".world", ""));
+        if (world == null) return null;
+        return new Location(world,
+            plugin.getConfig().getDouble(path + ".x"), plugin.getConfig().getDouble(path + ".y"),
+            plugin.getConfig().getDouble(path + ".z"),
+            (float) plugin.getConfig().getDouble(path + ".yaw"),
+            (float) plugin.getConfig().getDouble(path + ".pitch"));
     }
 
     // --- private-team grants ------------------------------------------------

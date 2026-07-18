@@ -107,7 +107,7 @@ public final class DialogMenu {
             // (private) join messages the player and reopens this selector.
             actions.append(button(label, "facility team " + team.id())).append(",");
         }
-        actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "menu"));
+        actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "facility back"));
         String body = "{type:\"minecraft:plain_message\",contents:"
             + json(Component.text("Choose your team.", NamedTextColor.GRAY)) + "}";
         return dialog("SELECT TEAM", body, actions.toString());

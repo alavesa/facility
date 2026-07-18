@@ -1,10 +1,12 @@
 name: Facility
-version: '0.3.0'
+version: '0.4.0'
 main: fi.alavesa.facility.FacilityPlugin
 api-version: '1.21'
 author: Piia Alavesa
 description: Main menu / lobby / teams / combat-log system for the SITE-19 SCP prison RP server.
-softdepend: [LuckPerms, Labra]
+# Terminal is a SOFT dep only: we defer to its CCTV spectator sessions via a
+# PDC check, but never require it to be present.
+softdepend: [LuckPerms, Labra, Terminal]
 commands:
   facility:
     description: Lobby menu, team selection, and admin team management

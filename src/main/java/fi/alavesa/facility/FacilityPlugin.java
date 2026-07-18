@@ -36,6 +36,8 @@ public final class FacilityPlugin extends JavaPlugin {
     private LobbyManager lobby;
     private DialogMenu dialogMenu;
     private CombatLogListener combat;
+    private MenuStore menuStore;
+    private MenuEditor menuEditor;
 
     private NamespacedKey teamKey;
 
@@ -48,12 +50,15 @@ public final class FacilityPlugin extends JavaPlugin {
         teams = new TeamManager(this);
         teams.load();
 
-        dialogMenu = new DialogMenu(teams);
+        menuStore = new MenuStore(this);
+        dialogMenu = new DialogMenu(teams, menuStore);
         lobby = new LobbyManager(this, store, dialogMenu);
         combat = new CombatLogListener(this, store);
+        menuEditor = new MenuEditor(this, menuStore);
 
         getServer().getPluginManager().registerEvents(lobby, this);
         getServer().getPluginManager().registerEvents(combat, this);
+        getServer().getPluginManager().registerEvents(menuEditor, this);
         // The countdown bar ticks every 5 ticks (4 Hz) for smooth drain.
         getServer().getScheduler().runTaskTimer(this, combat, 20L, 5L);
 
@@ -126,6 +131,9 @@ public final class FacilityPlugin extends JavaPlugin {
                     + teams.ids(), NamedTextColor.AQUA));
                 return true;
             }
+            case "menu" -> {
+                return handleMenu(sender, args);
+            }
             default -> {
                 return usage(sender);
             }
@@ -183,6 +191,131 @@ public final class FacilityPlugin extends JavaPlugin {
         return true;
     }
 
+    /**
+     * /facility menu ... - the operator editor for the MAIN dialog contents.
+     * All admin-only. Mutations persist through {@link MenuStore} and are
+     * reflected the next time the dialog is opened (DialogMenu reads live).
+     */
+    private boolean handleMenu(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+        if (args.length < 2) return menuUsage(sender);
+        String sub = args[1].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "list" -> {
+                List<MenuElement> els = menuStore.elements();
+                sender.sendMessage(Component.text("Menu elements (" + els.size() + "):",
+                    NamedTextColor.AQUA));
+                for (int i = 0; i < els.size(); i++) {
+                    MenuElement el = els.get(i);
+                    String desc = el.type() == MenuElement.Type.BUTTON
+                        ? "button  \"" + el.label() + "\" -> /" + el.action()
+                        : "text    \"" + el.label() + "\"";
+                    sender.sendMessage(Component.text("  #" + (i + 1) + "  " + desc,
+                        NamedTextColor.GRAY));
+                }
+                return true;
+            }
+            case "edit" -> {
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                menuEditor.open(player);
+                return true;
+            }
+            case "add" -> {
+                if (args.length < 3) return error(sender, "/facility menu add <button <action> <label...>|text <label...>>");
+                String kind = args[2].toLowerCase(Locale.ROOT);
+                if (kind.equals("button")) {
+                    if (args.length < 5) return error(sender, "/facility menu add button <action> <label...>");
+                    String action = args[3];
+                    String label = String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length));
+                    menuStore.add(MenuElement.button(label, action));
+                    sender.sendMessage(Component.text("Added button \"" + label + "\" -> /" + action,
+                        NamedTextColor.AQUA));
+                    return true;
+                }
+                if (kind.equals("text")) {
+                    if (args.length < 4) return error(sender, "/facility menu add text <label...>");
+                    String label = String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length));
+                    menuStore.add(MenuElement.text(label));
+                    sender.sendMessage(Component.text("Added text line \"" + label + "\"",
+                        NamedTextColor.AQUA));
+                    return true;
+                }
+                return error(sender, "Add type must be 'button' or 'text'.");
+            }
+            case "remove" -> {
+                Integer idx = index(sender, args, 2);
+                if (idx == null) return true;
+                MenuElement removed = menuStore.remove(idx);
+                if (removed == null) return error(sender, "No element #" + (idx + 1) + ".");
+                sender.sendMessage(Component.text("Removed element #" + (idx + 1) + ".",
+                    NamedTextColor.AQUA));
+                return true;
+            }
+            case "move" -> {
+                if (args.length < 4) return error(sender, "/facility menu move <index> up|down");
+                Integer idx = index(sender, args, 2);
+                if (idx == null) return true;
+                int delta = args[3].equalsIgnoreCase("up") ? -1
+                    : args[3].equalsIgnoreCase("down") ? +1 : 0;
+                if (delta == 0) return error(sender, "Direction must be up or down.");
+                if (!menuStore.move(idx, delta)) return error(sender, "Can't move #" + (idx + 1) + " that way.");
+                sender.sendMessage(Component.text("Moved element #" + (idx + 1) + " "
+                    + args[3].toLowerCase(Locale.ROOT) + ".", NamedTextColor.AQUA));
+                return true;
+            }
+            case "setlabel" -> {
+                if (args.length < 4) return error(sender, "/facility menu setlabel <index> <label...>");
+                Integer idx = index(sender, args, 2);
+                if (idx == null) return true;
+                String label = String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length));
+                if (!menuStore.setLabel(idx, label)) return error(sender, "No element #" + (idx + 1) + ".");
+                sender.sendMessage(Component.text("Element #" + (idx + 1) + " label set.",
+                    NamedTextColor.AQUA));
+                return true;
+            }
+            case "setaction" -> {
+                if (args.length < 4) return error(sender, "/facility menu setaction <index> <command...>");
+                Integer idx = index(sender, args, 2);
+                if (idx == null) return true;
+                String action = String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length));
+                if (!menuStore.setAction(idx, action)) {
+                    return error(sender, "No button #" + (idx + 1) + " (only buttons have actions).");
+                }
+                sender.sendMessage(Component.text("Element #" + (idx + 1) + " action set to /" + action,
+                    NamedTextColor.AQUA));
+                return true;
+            }
+            default -> {
+                return menuUsage(sender);
+            }
+        }
+    }
+
+    /** Parse a 1-based index arg into a 0-based index, messaging on failure.
+     *  Returns null (and messages) if missing / not a number. */
+    private Integer index(CommandSender sender, String[] args, int pos) {
+        if (args.length <= pos) {
+            error(sender, "Missing element number.");
+            return null;
+        }
+        try {
+            int one = Integer.parseInt(args[pos]);
+            if (one < 1) { error(sender, "Element number starts at 1."); return null; }
+            return one - 1;
+        } catch (NumberFormatException e) {
+            error(sender, "'" + args[pos] + "' is not a number.");
+            return null;
+        }
+    }
+
+    private boolean menuUsage(CommandSender sender) {
+        sender.sendMessage(Component.text(
+            "/facility menu list | edit | add button <action> <label...> | add text <label...> | "
+            + "remove <index> | move <index> up|down | setlabel <index> <label...> | "
+            + "setaction <index> <command...>", NamedTextColor.AQUA));
+        return true;
+    }
+
     private boolean handleGrant(CommandSender sender, String playerName, String teamName, boolean grant) {
         Team team = teams.get(teamName);
         if (team == null) return error(sender, "No team named '" + teamName + "'.");
@@ -210,8 +343,13 @@ public final class FacilityPlugin extends JavaPlugin {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        boolean admin = sender.hasPermission("facility.admin");
         return switch (args.length) {
-            case 1 -> filter(Stream.of("continue", "teams", "team", "grant", "revoke", "reload"), args[0]);
+            case 1 -> {
+                List<String> top = new ArrayList<>(List.of("continue", "teams", "team"));
+                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu"));
+                yield filter(top.stream(), args[0]);
+            }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "team" -> {
                     List<String> opts = new ArrayList<>(teams.ids());
@@ -220,20 +358,41 @@ public final class FacilityPlugin extends JavaPlugin {
                     yield filter(opts.stream(), args[1]);
                 }
                 case "grant", "revoke" -> filter(online(), args[1]);
+                case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
+                    "move", "setlabel", "setaction"), args[1]) : List.of();
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "team" -> args[1].equalsIgnoreCase("remove")
                     ? filter(teams.ids().stream(), args[2]) : List.of();
                 case "grant", "revoke" -> filter(privateTeamIds(), args[2]);
+                case "menu" -> menuArgComplete(args);
                 default -> List.of();
             };
-            case 4 -> args[0].equalsIgnoreCase("team") && args[1].equalsIgnoreCase("add")
-                ? filter(Stream.of("public", "private"), args[3]) : List.of();
+            case 4 -> {
+                if (args[0].equalsIgnoreCase("team") && args[1].equalsIgnoreCase("add"))
+                    yield filter(Stream.of("public", "private"), args[3]);
+                if (args[0].equalsIgnoreCase("menu") && args[1].equalsIgnoreCase("move"))
+                    yield filter(Stream.of("up", "down"), args[3]);
+                yield List.of();
+            }
             case 6 -> args[0].equalsIgnoreCase("team") && args[1].equalsIgnoreCase("add")
                 ? filter(Stream.of("IRON_CHESTPLATE", "NETHERITE_HELMET", "PAPER", "ORANGE_WOOL"), args[5]) : List.of();
             default -> List.of();
         };
+    }
+
+    /** Third-arg completion for /facility menu <sub> ... */
+    private List<String> menuArgComplete(String[] args) {
+        String sub = args[1].toLowerCase(Locale.ROOT);
+        if (sub.equals("add")) return filter(Stream.of("button", "text"), args[2]);
+        if (sub.equals("remove") || sub.equals("move")
+            || sub.equals("setlabel") || sub.equals("setaction")) {
+            List<String> nums = new ArrayList<>();
+            for (int i = 1; i <= menuStore.size(); i++) nums.add(String.valueOf(i));
+            return filter(nums.stream(), args[2]);
+        }
+        return List.of();
     }
 
     private Stream<String> online() {
@@ -252,7 +411,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private boolean usage(CommandSender sender) {
         sender.sendMessage(Component.text(
             "/facility continue | teams | team <name> | team add <name> <public|private> <rank> [ICON] | "
-            + "team remove <name> | grant <player> <team> | revoke <player> <team> | reload",
+            + "team remove <name> | grant <player> <team> | revoke <player> <team> | reload | menu ...",
             NamedTextColor.AQUA));
         return true;
     }

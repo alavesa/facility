@@ -67,14 +67,24 @@ public final class CombatLogListener implements Listener, Runnable {
         tag(attacker, victim);
     }
 
-    /** Melee attacker, or the shooter behind a projectile. */
+    /**
+     * Melee attacker, or the player behind a projectile.
+     *
+     * Guns routes bullet damage through {@code target.damage(dmg, shooterPlayer)}
+     * (see Guns ShootListener#applyHit), so a gun hit arrives here with the
+     * SHOOTER as the direct damager - caught by the first branch. Vanilla /
+     * other-plugin arrows and thrown projectiles arrive as a {@link Projectile}
+     * whose shooter we resolve here. Crucially, a projectile fired by a NON-
+     * player (an SCP skeleton, a dispenser) resolves to null, so SCP mob damage
+     * never falsely tags a player for combat.
+     */
     private Player resolveAttacker(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player p) return p;
         if (event.getDamager() instanceof Projectile proj) {
             ProjectileSource src = proj.getShooter();
             if (src instanceof Player p) return p;
         }
-        return null;
+        return null;   // mob / environmental / non-player projectile: not PvP
     }
 
     /** Tag (or refresh) the victim, remembering who last hit them. */

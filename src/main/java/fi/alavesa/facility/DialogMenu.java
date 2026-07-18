@@ -1,5 +1,6 @@
 package fi.alavesa.facility;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -10,14 +11,20 @@ import org.bukkit.entity.Player;
 
 /**
  * The lobby menu as a native Minecraft DIALOG (1.21.6+ /dialog feature) - the
- * same system DonutSMP uses. No chest, no book, no resource pack: these are
- * real full-screen GUIs with real buttons, rendered by the client.
+ * same system DonutSMP uses. No chest, no book: these are real full-screen
+ * GUIs with real buttons, rendered by the client.
  *
  * The plugin builds each dialog INLINE as SNBT and shows it with
- * {@code /dialog show <player> {...}}. Because it's rebuilt from config every
- * time, teams added with {@code /facility team add} appear in the selector
- * automatically. {@code can_close_with_escape:false} makes the main menu an
- * un-escapable lobby lock - the only way out is the PLAY button.
+ * {@code /dialog show <player> {...}}. The MAIN dialog is now built from the
+ * operator-editable {@link MenuStore} element list (buttons + text lines), so
+ * admins can reshape it at runtime via commands or the chest editor. The TEAM
+ * selector is still rebuilt live from config teams. {@code
+ * can_close_with_escape:false} makes the main menu an un-escapable lobby lock.
+ *
+ * The main dialog also carries a resource-pack BACKGROUND: a bitmap glyph in
+ * the {@code facility:dialog} font (see tools/gen_dialog_bg.py) painted as the
+ * first body line, pulled into place by a negative-space rewind. The glyph
+ * codepoints below MUST match font/dialog.json exactly.
  *
  * Text is authored as Adventure Components and serialized to JSON, which is
  * valid SNBT for the dialog's text-component fields.
@@ -26,10 +33,23 @@ public final class DialogMenu {
 
     private static final GsonComponentSerializer GSON = GsonComponentSerializer.gson();
 
-    private final TeamManager teams;
+    /** The background font + glyph codepoints - keep in sync with
+     *  resource-pack/assets/facility/font/dialog.json (gen_dialog_bg.py).
+     *  U+E000 rewind advance, U+E001 fine nudge, U+E010 the panel bitmap. */
+    private static final Key BG_FONT = Key.key("facility", "dialog");
+    private static final char BG_REWIND = '\ue000';
+    private static final char BG_NUDGE  = '\ue001';   // repeat to fine-tune X
+    private static final char BG_PANEL  = '\ue010';
+    /** How many 1px nudge glyphs to prepend after the rewind (blind pixel work -
+     *  needs in-game screenshot tuning). 0 = panel starts at the rewind point. */
+    private static final int BG_NUDGE_COUNT = 0;
 
-    public DialogMenu(TeamManager teams) {
+    private final TeamManager teams;
+    private final MenuStore menu;
+
+    public DialogMenu(TeamManager teams, MenuStore menu) {
         this.teams = teams;
+        this.menu = menu;
     }
 
     public void openMain(Player player) {
@@ -47,11 +67,25 @@ public final class DialogMenu {
 
     // --- dialog builders ----------------------------------------------------
 
+    /** The MAIN dialog, built from the operator-editable element list: TEXT
+     *  elements become body lines, BUTTON elements become action buttons. A
+     *  malformed element can never appear here (MenuStore skips them). */
     private String mainDialog() {
-        String actions =
-            button(Component.text("▶ PLAY", NamedTextColor.GREEN, TextDecoration.BOLD), "facility continue")
-            + "," + button(Component.text("SELECT TEAM", NamedTextColor.AQUA), "facility teams");
-        return dialog("SITE-19 // MAIN MENU", "Welcome to Site-19. Choose an option.", actions);
+        StringBuilder body = new StringBuilder();
+        // The background glyph is the first body line, behind everything else.
+        body.append(bgBodyElement());
+
+        StringBuilder actions = new StringBuilder();
+        for (MenuElement el : menu.elements()) {
+            if (el.type() == MenuElement.Type.TEXT) {
+                body.append(",{type:\"minecraft:plain_message\",contents:")
+                    .append(json(legacy(el.label()))).append("}");
+            } else {
+                if (actions.length() > 0) actions.append(",");
+                actions.append(button(legacy(el.label()), el.action()));
+            }
+        }
+        return dialog("SITE-19 // MAIN MENU", body.toString(), actions.toString());
     }
 
     private String teamsDialog(Player player) {
@@ -66,17 +100,32 @@ public final class DialogMenu {
             actions.append(button(label, "facility team " + team.id())).append(",");
         }
         actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "menu"));
-        return dialog("SELECT TEAM", "Choose your team.", actions.toString());
+        String body = "{type:\"minecraft:plain_message\",contents:"
+            + json(Component.text("Choose your team.", NamedTextColor.GRAY)) + "}";
+        return dialog("SELECT TEAM", body, actions.toString());
     }
 
-    /** A multi_action dialog: title, one body line, a column of action buttons,
-     *  un-escapable so it doubles as the lobby lock. */
-    private String dialog(String title, String body, String actionsCsv) {
+    /** The background as a body element: the panel glyph, preceded by the
+     *  negative-space rewind (and optional fine nudges) in the facility:dialog
+     *  font. The offsets are blind pixel work; tune with an in-game screenshot. */
+    private String bgBodyElement() {
+        StringBuilder glyphs = new StringBuilder();
+        glyphs.append(BG_REWIND);
+        for (int i = 0; i < BG_NUDGE_COUNT; i++) glyphs.append(BG_NUDGE);
+        glyphs.append(BG_PANEL);
+        Component bg = Component.text(glyphs.toString())
+            .font(BG_FONT).color(NamedTextColor.WHITE);
+        return "{type:\"minecraft:plain_message\",contents:" + json(bg) + "}";
+    }
+
+    /** A multi_action dialog: title, a body (raw SNBT element CSV), a column of
+     *  action buttons, un-escapable so it doubles as the lobby lock. Callers
+     *  pass the body already serialized (so it can carry the bg glyph). */
+    private String dialog(String title, String bodyCsv, String actionsCsv) {
         return "{type:\"minecraft:multi_action\""
             + ",title:" + json(Component.text(title, NamedTextColor.GOLD, TextDecoration.BOLD))
             + ",can_close_with_escape:false"
-            + ",body:[{type:\"minecraft:plain_message\",contents:"
-                + json(Component.text(body, NamedTextColor.GRAY)) + "}]"
+            + ",body:[" + bodyCsv + "]"
             + ",columns:1"
             + ",actions:[" + actionsCsv + "]}";
     }
@@ -95,7 +144,7 @@ public final class DialogMenu {
     }
 
     private Component legacy(String s) {
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(s);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(s == null ? "" : s);
     }
 
     private String quote(String s) {

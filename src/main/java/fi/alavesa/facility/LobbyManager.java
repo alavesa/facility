@@ -6,20 +6,24 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
-import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,9 +35,16 @@ import java.util.UUID;
  * world proper. If they had a pending combat-log death we float a hologram of
  * it in front of them once they land.
  *
- * The menu is drawn by our own {@link FallbackMenu} (custom chest GUIs) - the
- * ONLY time a player is thrown to the menu is on rejoin. Death/respawn never
- * locks them (see {@link #onRespawn}); {@code /menu} lets them return by hand.
+ * The menu is drawn by {@link DialogMenu} (native /dialog). The ONLY time a
+ * player is thrown to the menu automatically is on rejoin. Death/respawn never
+ * locks them (see {@link #onRespawn}); {@code /menu} lets them return by hand -
+ * but re-entry by hand requires a 10-second STAND-STILL hold first (config
+ * {@code menu.reentry-seconds}), while the initial join-lock opens immediately.
+ *
+ * Compatibility: a player who is inside a Terminal CCTV session is in spectator
+ * mode for another plugin's reasons. We detect that by Terminal's PDC key
+ * ({@code terminal:cctv_back}) and NEVER lock, teleport, restore gamemode over,
+ * or reopen the dialog on such a player.
  */
 public final class LobbyManager implements Listener {
 
@@ -43,6 +54,13 @@ public final class LobbyManager implements Listener {
 
     /** Players who have Continued this session and shouldn't be re-locked. */
     private final Set<UUID> continued = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /** In-flight re-entry stand-still holds (from /menu), keyed by player. */
+    private final Map<UUID, BukkitTask> reentryHolds = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
+     *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
+    private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
 
     public LobbyManager(FacilityPlugin plugin, PlayerStore store, DialogMenu dialogMenu) {
         this.plugin = plugin;
@@ -63,8 +81,12 @@ public final class LobbyManager implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        // Only snapshot a real, in-world position - never the menu lock itself.
-        if (continued.contains(player.getUniqueId()) && player.getGameMode() != GameMode.SPECTATOR) {
+        cancelReentry(player, null);
+        // Only snapshot a real, in-world position - never the menu lock itself,
+        // and never a CCTV spectator session (Terminal owns that restore).
+        if (continued.contains(player.getUniqueId())
+            && player.getGameMode() != GameMode.SPECTATOR
+            && !inCctv(player)) {
             store.saveLogout(player);
         }
         continued.remove(player.getUniqueId());
@@ -74,22 +96,28 @@ public final class LobbyManager implements Listener {
      * Dying must NEVER throw a player back to the menu - the menu is a rejoin-
      * only thing. A player who has already Continued this session stays
      * Continued through death, so no join-style lock can fire on the respawn.
-     * This handler makes that explicit and is a hard guard against any future
-     * path (or another plugin) trying to spectator-lock them on death.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         if (continued.contains(player.getUniqueId())) return;   // already in-world: leave them be
-        // Not marked Continued (e.g. died during the same tick they joined):
-        // treat them as Continued so the respawn drops them into the world,
-        // not the menu. They can reopen it with /menu.
         continued.add(player.getUniqueId());
     }
 
     /** Freeze the player at the lobby vantage in spectator and open the menu. */
     private void lock(Player player) {
         if (!player.isOnline() || continued.contains(player.getUniqueId())) return;
+        // Never hijack a Terminal CCTV session or an admin's creative session,
+        // and (unless configured) never lock an op.
+        if (inCctv(player)) return;
+        if (player.getGameMode() == GameMode.CREATIVE) {
+            continued.add(player.getUniqueId());   // treat as already in-world
+            return;
+        }
+        if (player.isOp() && !plugin.getConfig().getBoolean("menu.lock-ops", false)) {
+            continued.add(player.getUniqueId());
+            return;
+        }
         player.setGameMode(GameMode.SPECTATOR);
         Location vantage = lobbyVantage(player);
         if (vantage != null) player.teleport(vantage);
@@ -103,12 +131,83 @@ public final class LobbyManager implements Listener {
         dialogMenu.openMain(player);
     }
 
+    // --- /menu re-entry: 10-second stand-still hold --------------------------
+
     /**
-     * {@code /menu}: send the player back to the menu by hand. Re-locks them
-     * into spectator at the vantage and reopens the menu, exactly like a fresh
-     * rejoin - their return point is snapshotted first so Continue still works.
+     * {@code /menu}: send the player back to the menu by hand - but not
+     * instantly. Start a stand-still hold: they must not move a block or take
+     * damage for {@code menu.reentry-seconds} seconds. Moving/being hit cancels
+     * it. On completion we lock them exactly like a fresh rejoin.
+     *
+     * The initial join-lock does NOT go through here (it calls {@link #lock}
+     * directly), so new arrivals still open the menu immediately.
      */
     public void returnToMenu(Player player) {
+        if (inCctv(player)) {
+            player.sendActionBar(Component.text("Not while jacked into CCTV.", NamedTextColor.RED));
+            return;
+        }
+        if (continued.contains(player.getUniqueId()) && player.getGameMode() == GameMode.SPECTATOR) {
+            // Already at the menu (or free-spectating); just reopen it.
+            openMainMenu(player);
+            return;
+        }
+        if (reentryHolds.containsKey(player.getUniqueId())) return;   // already counting
+
+        int seconds = Math.max(0, plugin.getConfig().getInt("menu.reentry-seconds", 10));
+        if (seconds == 0) {   // hold disabled: behave like the old instant /menu
+            doReturnToMenu(player);
+            return;
+        }
+
+        final Location anchor = player.getLocation().clone();
+        final long endAt = System.currentTimeMillis() + seconds * 1000L;
+        BukkitTask task = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+            if (!player.isOnline()) { cancelReentry(player, null); return; }
+            // Moved a full block on any axis? cancel.
+            Location now = player.getLocation();
+            if (now.getBlockX() != anchor.getBlockX()
+                || now.getBlockY() != anchor.getBlockY()
+                || now.getBlockZ() != anchor.getBlockZ()) {
+                cancelReentry(player, "Cancelled - you moved.");
+                return;
+            }
+            long remainMs = endAt - System.currentTimeMillis();
+            if (remainMs <= 0) {
+                cancelReentry(player, null);
+                doReturnToMenu(player);
+                return;
+            }
+            int remain = (int) Math.ceil(remainMs / 1000.0);
+            player.sendActionBar(Component.text("Returning to menu in " + remain
+                + "s... hold still", NamedTextColor.AQUA));
+        }, 0L, 5L);   // 4 Hz, smooth countdown
+        reentryHolds.put(player.getUniqueId(), task);
+    }
+
+    /** Cancel a running re-entry hold, optionally telling the player why. */
+    private void cancelReentry(Player player, String reason) {
+        BukkitTask task = reentryHolds.remove(player.getUniqueId());
+        if (task != null) task.cancel();
+        if (reason != null && player.isOnline()) {
+            player.sendActionBar(Component.text(reason, NamedTextColor.RED));
+        }
+    }
+
+    /** Taking damage cancels an in-flight stand-still hold. */
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
+    public void onDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (reentryHolds.containsKey(player.getUniqueId())) {
+            cancelReentry(player, "Cancelled - you took damage.");
+        }
+    }
+
+    /** The actual re-lock, once the stand-still hold completes. Re-locks them
+     *  into spectator at the vantage and reopens the menu, exactly like a fresh
+     *  rejoin - their return point is snapshotted first so Continue still works. */
+    private void doReturnToMenu(Player player) {
+        if (inCctv(player)) return;   // defensive: never re-lock over CCTV
         if (player.getGameMode() != GameMode.SPECTATOR) store.saveLogout(player);
         continued.remove(player.getUniqueId());
         lock(player);
@@ -118,6 +217,7 @@ public final class LobbyManager implements Listener {
 
     /** The Continue button lands here. Return them to the world and unlock. */
     public void continueInto(Player player) {
+        cancelReentry(player, null);
         continued.add(player.getUniqueId());
         player.closeInventory();
 
@@ -144,6 +244,19 @@ public final class LobbyManager implements Listener {
 
     public boolean hasContinued(UUID id) {
         return continued.contains(id);
+    }
+
+    // --- compatibility helpers ----------------------------------------------
+
+    /** Is this player inside a Terminal CCTV session? Detected softly by the
+     *  crash-backup PDC key Terminal sets before it flips them to spectator, so
+     *  no hard dependency on Terminal is needed. */
+    private boolean inCctv(Player player) {
+        try {
+            return player.getPersistentDataContainer().has(CCTV_BACK, PersistentDataType.STRING);
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     // --- lobby vantage ------------------------------------------------------

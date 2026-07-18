@@ -16,6 +16,27 @@ lobby:
 combat:
   seconds: 15
 
+# The MAIN menu dialog, operator-editable at runtime.
+#   reentry-seconds - how long a player must STAND STILL (no block move, no
+#                     damage) after /menu before the menu reopens. The initial
+#                     join-lock still opens the menu immediately; only manual
+#                     re-entry uses this hold. Default 10.
+#   lock-ops        - whether ops are subject to the join-lock. Default false;
+#                     a player already in CREATIVE is NEVER locked regardless.
+#   elements        - the ordered contents of the main dialog. Each element is
+#                     one of:
+#                       {type: button, label: "<&-coloured>", action: "<command>"}
+#                       {type: text,   label: "<&-coloured>"}
+#                     A button runs its command (no leading slash) on click; a
+#                     text element is a body line. Edit with /facility menu ...
+#                     or the chest GUI editor (/facility menu edit).
+menu:
+  reentry-seconds: 10
+  lock-ops: false
+  elements:
+    - {type: button, label: "&a&l▶ PLAY", action: "facility continue"}
+    - {type: button, label: "&bSELECT TEAM", action: "facility teams"}
+
 # Teams. Joining a team ACTUALLY confers three things, applied through
 # LuckPerms when the player picks it:
 #   rank        - the LuckPerms group the player is put into (the group is

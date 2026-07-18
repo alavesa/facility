@@ -1,0 +1,20 @@
+{
+  "providers": [
+    {
+      "type": "space",
+      "advances": {
+        "": -260,
+        "": -1
+      }
+    },
+    {
+      "type": "bitmap",
+      "file": "facility:font/dialog_bg.png",
+      "ascent": 8,
+      "height": 160,
+      "chars": [
+        ""
+      ]
+    }
+  ]
+}

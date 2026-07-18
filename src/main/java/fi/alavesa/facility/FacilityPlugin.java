@@ -130,6 +130,23 @@ public final class FacilityPlugin extends JavaPlugin {
                 lobby.reopenMain(player);
                 return true;
             }
+            case "spawn" -> {
+                // Spawn-picker button: deploy the player at their chosen spawn.
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                String teamId = store.getTeam(player.getUniqueId());
+                java.util.List<TeamManager.SpawnPoint> spawns =
+                    teamId == null ? java.util.List.of() : teams.getSpawns(teamId);
+                int idx;
+                try { idx = Integer.parseInt(args[1]) - 1; }
+                catch (Exception e) { return error(sender, "Pick a spawn from the menu."); }
+                if (idx < 0 || idx >= spawns.size()) {
+                    lobby.openMainMenu(player);   // stale choice - back to the menu
+                    return true;
+                }
+                lobby.continueTo(player, spawns.get(idx).loc());
+                return true;
+            }
             case "team" -> {
                 return handleTeam(sender, args);
             }
@@ -213,9 +230,67 @@ public final class FacilityPlugin extends JavaPlugin {
             if (args.length < 3) return error(sender, "/facility team setspawn <name>");
             Team t = teams.get(args[2]);
             if (t == null) return error(sender, "No team named '" + args[2] + "'.");
-            teams.setSpawn(t.id(), admin.getLocation());
-            sender.sendMessage(Component.text("Spawn for '" + t.id() + "' set to your location. "
-                + "Members arrive + respawn here.", NamedTextColor.AQUA));
+            teams.setSpawn(t.id(), admin.getLocation());   // replaces all with one
+            sender.sendMessage(Component.text("Spawn for '" + t.id() + "' set to your location "
+                + "(replaced any others). Use 'addspawn' for multiple.", NamedTextColor.AQUA));
+            return true;
+        }
+        if (sub.equals("addspawn")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (!(sender instanceof Player admin)) return error(sender, "Players only.");
+            if (args.length < 3) return error(sender, "/facility team addspawn <name> [label...]");
+            Team t = teams.get(args[2]);
+            if (t == null) return error(sender, "No team named '" + args[2] + "'.");
+            String label = args.length >= 4
+                ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
+                : "Spawn " + (teams.getSpawns(t.id()).size() + 1);
+            teams.addSpawn(t.id(), label, admin.getLocation());
+            sender.sendMessage(Component.text("Added spawn '" + label + "' to '" + t.id() + "' ("
+                + teams.getSpawns(t.id()).size() + " total, mode: " + teams.getSpawnMode(t.id()) + ").",
+                NamedTextColor.AQUA));
+            return true;
+        }
+        if (sub.equals("delspawn")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (args.length < 4) return error(sender, "/facility team delspawn <name> <index>");
+            Team t = teams.get(args[2]);
+            if (t == null) return error(sender, "No team named '" + args[2] + "'.");
+            int idx;
+            try { idx = Integer.parseInt(args[3]); } catch (NumberFormatException e) {
+                return error(sender, "Index must be a number (see /facility team spawns " + t.id() + ").");
+            }
+            if (!teams.removeSpawn(t.id(), idx)) return error(sender, "No spawn #" + idx + " on '" + t.id() + "'.");
+            sender.sendMessage(Component.text("Removed spawn #" + idx + " from '" + t.id() + "'.",
+                NamedTextColor.AQUA));
+            return true;
+        }
+        if (sub.equals("spawns")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (args.length < 3) return error(sender, "/facility team spawns <name>");
+            Team t = teams.get(args[2]);
+            if (t == null) return error(sender, "No team named '" + args[2] + "'.");
+            java.util.List<TeamManager.SpawnPoint> list = teams.getSpawns(t.id());
+            sender.sendMessage(Component.text("'" + t.id() + "' spawns (mode: "
+                + teams.getSpawnMode(t.id()) + "):", NamedTextColor.AQUA));
+            if (list.isEmpty()) sender.sendMessage(Component.text("  (none)", NamedTextColor.GRAY));
+            for (int i = 0; i < list.size(); i++) {
+                TeamManager.SpawnPoint sp = list.get(i);
+                sender.sendMessage(Component.text("  " + (i + 1) + ". " + sp.name() + " @ "
+                    + sp.loc().getBlockX() + " " + sp.loc().getBlockY() + " " + sp.loc().getBlockZ(),
+                    NamedTextColor.GRAY));
+            }
+            return true;
+        }
+        if (sub.equals("spawnmode")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (args.length < 4 || !(args[3].equalsIgnoreCase("random") || args[3].equalsIgnoreCase("choose")))
+                return error(sender, "/facility team spawnmode <name> <random|choose>");
+            Team t = teams.get(args[2]);
+            if (t == null) return error(sender, "No team named '" + args[2] + "'.");
+            teams.setSpawnMode(t.id(), args[3]);
+            sender.sendMessage(Component.text("'" + t.id() + "' spawn mode: " + teams.getSpawnMode(t.id())
+                + (teams.getSpawnMode(t.id()).equals("choose") ? " (players pick a spawn)"
+                    : " (a random spawn each time)") + ".", NamedTextColor.AQUA));
             return true;
         }
 
@@ -403,9 +478,8 @@ public final class FacilityPlugin extends JavaPlugin {
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "team" -> {
                     List<String> opts = new ArrayList<>(teams.ids());
-                    opts.add("add");
-                    opts.add("remove");
-                    opts.add("setspawn");
+                    opts.addAll(List.of("add", "remove", "setspawn", "addspawn", "delspawn",
+                        "spawns", "spawnmode"));
                     yield filter(opts.stream(), args[1]);
                 }
                 case "grant", "revoke" -> filter(online(), args[1]);
@@ -415,7 +489,8 @@ public final class FacilityPlugin extends JavaPlugin {
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {
-                case "team" -> (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("setspawn"))
+                case "team" -> Stream.of("remove", "setspawn", "addspawn", "delspawn", "spawns", "spawnmode")
+                    .anyMatch(args[1]::equalsIgnoreCase)
                     ? filter(teams.ids().stream(), args[2]) : List.of();
                 case "grant", "revoke" -> filter(privateTeamIds(), args[2]);
                 case "menu" -> menuArgComplete(args);
@@ -424,6 +499,8 @@ public final class FacilityPlugin extends JavaPlugin {
             case 4 -> {
                 if (args[0].equalsIgnoreCase("team") && args[1].equalsIgnoreCase("add"))
                     yield filter(Stream.of("public", "private"), args[3]);
+                if (args[0].equalsIgnoreCase("team") && args[1].equalsIgnoreCase("spawnmode"))
+                    yield filter(Stream.of("random", "choose"), args[3]);
                 if (args[0].equalsIgnoreCase("menu") && args[1].equalsIgnoreCase("move"))
                     yield filter(Stream.of("up", "down"), args[3]);
                 yield List.of();

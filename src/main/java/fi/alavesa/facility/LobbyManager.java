@@ -165,15 +165,6 @@ public final class LobbyManager implements Listener {
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 2L);
     }
 
-    /** Respawn at your team's spawn, if it has one. */
-    @EventHandler
-    public void onRespawnTeamSpawn(PlayerRespawnEvent event) {
-        String teamId = store.getTeam(event.getPlayer().getUniqueId());
-        if (teamId == null) return;
-        Location spawn = teams.getSpawn(teamId);
-        if (spawn != null) event.setRespawnLocation(spawn);
-    }
-
     /**
      * The AUTOMATIC join-lock. Applies the exemptions: never hijack a Terminal
      * CCTV session, a creative session, or (unless configured) an op - those
@@ -363,30 +354,46 @@ public final class LobbyManager implements Listener {
 
     // --- continue -----------------------------------------------------------
 
-    /** The Continue button lands here. Return them to the world and unlock. */
+    /**
+     * The PLAY button lands here. Decide WHERE to deploy the player from their
+     * team's spawns:
+     *   - none            -> last logout location, else world spawn
+     *   - one             -> that spawn
+     *   - many + random   -> a random one
+     *   - many + choose   -> open the spawn-picker dialog (deploy happens when
+     *                        they pick, via {@link #continueTo})
+     */
     public void continueInto(Player player) {
+        String teamId = store.getTeam(player.getUniqueId());
+        java.util.List<TeamManager.SpawnPoint> spawns =
+            teamId == null ? java.util.List.of() : teams.getSpawns(teamId);
+
+        if (spawns.isEmpty()) {
+            Location dest = store.lastLocation(player.getUniqueId());
+            if (dest == null) dest = player.getWorld().getSpawnLocation();
+            continueTo(player, dest);
+        } else if (spawns.size() == 1) {
+            continueTo(player, spawns.get(0).loc());
+        } else if (teams.getSpawnMode(teamId).equalsIgnoreCase("choose")) {
+            dialogMenu.openSpawnChoice(player, spawns);   // pick, then continueTo
+        } else {
+            int i = java.util.concurrent.ThreadLocalRandom.current().nextInt(spawns.size());
+            continueTo(player, spawns.get(i).loc());
+        }
+    }
+
+    /** Actually deploy the player to a chosen location and leave the menu. */
+    public void continueTo(Player player, Location dest) {
         cancelReentry(player, null);
-        pendingMenu.remove(player.getUniqueId());   // stop the join re-show loop
+        pendingMenu.remove(player.getUniqueId());
         cancelNag(player.getUniqueId());
         stopMusic(player);
         continued.add(player.getUniqueId());
         player.closeInventory();
-
-        // Where to drop them: their team's spawn if it has one, else where they
-        // last stood, else world spawn.
-        Location dest = null;
-        String teamId = store.getTeam(player.getUniqueId());
-        if (teamId != null) dest = teams.getSpawn(teamId);
-        if (dest == null) dest = store.lastLocation(player.getUniqueId());
+        player.setGameMode(store.lastGameMode(player.getUniqueId()));
         if (dest == null) dest = player.getWorld().getSpawnLocation();
-        GameMode gm = store.lastGameMode(player.getUniqueId());
-        player.setGameMode(gm);
-        final Location target = dest;
-        player.teleport(target);
-
+        player.teleport(dest);
         player.sendMessage(Component.text("Welcome to Site-19. Stay sharp.", NamedTextColor.AQUA));
-        // The vanilla respawn screen already shows the death reason, so there's
-        // no combat-log death hologram anymore - just clear any stale record.
         store.clearPendingCombatDeath(player.getUniqueId());
     }
 

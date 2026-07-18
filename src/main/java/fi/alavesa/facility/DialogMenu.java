@@ -62,6 +62,20 @@ public final class DialogMenu {
         show(player, teamsDialog(player));
     }
 
+    /** Let the player pick which of their team's spawns to deploy at. Each button
+     *  runs {@code facility spawn <index>}; a «Back returns to the main menu. */
+    public void openSpawnChoice(Player player, java.util.List<TeamManager.SpawnPoint> spawns) {
+        StringBuilder actions = new StringBuilder();
+        for (int i = 0; i < spawns.size(); i++) {
+            actions.append(button(Component.text(spawns.get(i).name(), NamedTextColor.AQUA),
+                "facility spawn " + (i + 1))).append(",");
+        }
+        actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "facility back"));
+        String body = "{type:\"minecraft:plain_message\",contents:"
+            + json(Component.text("Choose your spawn point.", NamedTextColor.GRAY)) + "}";
+        show(player, dialog("SELECT SPAWN", body, actions.toString()));
+    }
+
     private void show(Player player, String snbt) {
         boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
             "dialog show " + player.getName() + " " + snbt);

@@ -129,22 +129,93 @@ public final class TeamManager {
 
     // --- team spawns --------------------------------------------------------
 
-    /** Set the team's spawn to a location, persisting. Players who pick this team
-     *  arrive here on Continue and respawn here on death. */
-    public void setSpawn(String teamId, Location loc) {
-        String path = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn";
-        plugin.getConfig().set(path + ".world", loc.getWorld().getName());
-        plugin.getConfig().set(path + ".x", loc.getX());
-        plugin.getConfig().set(path + ".y", loc.getY());
-        plugin.getConfig().set(path + ".z", loc.getZ());
-        plugin.getConfig().set(path + ".yaw", loc.getYaw());
-        plugin.getConfig().set(path + ".pitch", loc.getPitch());
+    /** A named spawn point for a team. */
+    public record SpawnPoint(String name, Location loc) {}
+
+    /** A team's spawn points, in order. Falls back to a legacy single spawn so
+     *  teams set with the old /facility team setspawn still work. */
+    public List<SpawnPoint> getSpawns(String teamId) {
+        List<SpawnPoint> out = new ArrayList<>();
+        if (teamId == null) return out;
+        for (String raw : plugin.getConfig().getStringList("teams." + teamId.toLowerCase(Locale.ROOT) + ".spawns")) {
+            SpawnPoint sp = decodeSpawn(raw);
+            if (sp != null) out.add(sp);
+        }
+        if (out.isEmpty()) {
+            Location legacy = legacySpawn(teamId);
+            if (legacy != null) out.add(new SpawnPoint("Spawn", legacy));
+        }
+        return out;
+    }
+
+    /** "random" = pick one at random on deploy/respawn; "choose" = let the player
+     *  pick from a menu. Default random. */
+    public String getSpawnMode(String teamId) {
+        return plugin.getConfig().getString("teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn-mode", "random");
+    }
+
+    public void setSpawnMode(String teamId, String mode) {
+        plugin.getConfig().set("teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn-mode",
+            mode.equalsIgnoreCase("choose") ? "choose" : "random");
         plugin.saveConfig();
     }
 
-    /** The team's spawn, or null if none set / its world is unloaded. */
-    public Location getSpawn(String teamId) {
-        if (teamId == null) return null;
+    /** Append a named spawn point. */
+    public void addSpawn(String teamId, String name, Location loc) {
+        String key = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawns";
+        List<String> raw = plugin.getConfig().getStringList(key);
+        raw.add(encodeSpawn(name, loc));
+        plugin.getConfig().set(key, raw);
+        plugin.saveConfig();
+    }
+
+    /** Replace all of a team's spawns with a single one (old setspawn behaviour). */
+    public void setSpawn(String teamId, Location loc) {
+        clearSpawns(teamId);
+        addSpawn(teamId, "Spawn", loc);
+    }
+
+    /** Remove a spawn by 1-based index; false if out of range. */
+    public boolean removeSpawn(String teamId, int oneBased) {
+        String key = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawns";
+        List<String> raw = plugin.getConfig().getStringList(key);
+        int i = oneBased - 1;
+        if (i < 0 || i >= raw.size()) return false;
+        raw.remove(i);
+        plugin.getConfig().set(key, raw);
+        plugin.saveConfig();
+        return true;
+    }
+
+    public void clearSpawns(String teamId) {
+        String key = teamId.toLowerCase(Locale.ROOT);
+        plugin.getConfig().set("teams." + key + ".spawns", null);
+        plugin.getConfig().set("teams." + key + ".spawn", null);   // wipe legacy too
+        plugin.saveConfig();
+    }
+
+    // encode/decode "name|world|x|y|z|yaw|pitch"
+    private String encodeSpawn(String name, Location l) {
+        return name.replace('|', ' ') + "|" + l.getWorld().getName() + "|" + l.getX() + "|"
+            + l.getY() + "|" + l.getZ() + "|" + l.getYaw() + "|" + l.getPitch();
+    }
+
+    private SpawnPoint decodeSpawn(String s) {
+        String[] p = s.split("\\|", 7);
+        if (p.length < 7) return null;
+        World world = Bukkit.getWorld(p[1]);
+        if (world == null) return null;
+        try {
+            return new SpawnPoint(p[0], new Location(world, Double.parseDouble(p[2]),
+                Double.parseDouble(p[3]), Double.parseDouble(p[4]),
+                Float.parseFloat(p[5]), Float.parseFloat(p[6])));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** The old single-spawn format, for backward compatibility. */
+    private Location legacySpawn(String teamId) {
         String path = "teams." + teamId.toLowerCase(Locale.ROOT) + ".spawn";
         if (!plugin.getConfig().contains(path + ".world")) return null;
         World world = Bukkit.getWorld(plugin.getConfig().getString(path + ".world", ""));

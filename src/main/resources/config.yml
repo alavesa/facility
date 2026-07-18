@@ -34,11 +34,12 @@ combat:
 #                     pack, e.g. facility:menu_theme). Stops on PLAY / leaving.
 menu:
   reentry-seconds: 10
-  # background - the custom resource-pack panel behind the dialog. If the menu
-  # ever fails to render, set this to false to rule the background glyph out
-  # (the menu worked before the background was added, so this isolates it fast).
+  # background - the custom resource-pack panel behind the dialog. Default OFF:
+  # the menu worked before the background was added, and the background glyph is
+  # the prime suspect for it failing to render, so we ship the plain (known-good)
+  # dialog. Set to true to try the custom panel once its positioning is dialled in.
   background:
-    enabled: true
+    enabled: false
   music:
     enabled: true
     sound: "minecraft:music_disc.chirp"

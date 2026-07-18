@@ -81,7 +81,7 @@ public final class DialogMenu {
         java.util.List<String> body = new java.util.ArrayList<>();
         // The custom background is opt-out: if the menu ever fails to render,
         // flip menu.background.enabled to false to rule the glyph in or out.
-        if (plugin.getConfig().getBoolean("menu.background.enabled", true)) {
+        if (plugin.getConfig().getBoolean("menu.background.enabled", false)) {
             body.add(bgBodyElement());
         }
         StringBuilder actions = new StringBuilder();

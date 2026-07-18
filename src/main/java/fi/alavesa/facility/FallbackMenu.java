@@ -50,7 +50,7 @@ public final class FallbackMenu implements Listener {
 
     // Chest rows the baked bars / wells live on (row r = slots r*9 .. r*9+8).
     private static final int PLAY_ROW = 1;
-    private static final int TEAM_BTN_ROW = 3;
+    private static final int TEAM_BTN_ROW = 2;
     private static final int[] TEAM_SLOTS = {10, 11, 12, 13, 14, 15, 16,   // wells row 1
                                              28, 29, 30, 31, 32, 33, 34};  // wells row 3
 
@@ -141,7 +141,8 @@ public final class FallbackMenu implements Listener {
                 .get(plugin.teamKey(), PersistentDataType.STRING);
             if (id != null) {
                 player.performCommand("facility team " + id);
-                player.closeInventory();
+                // Back to the main menu so they can press PLAY to leave spectator.
+                open(player);
             }
         }
     }

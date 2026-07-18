@@ -140,14 +140,17 @@ public final class FacilityPlugin extends JavaPlugin {
 
         if (sub.equals("add")) {
             if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
-            if (args.length < 5) return error(sender, "/facility team add <name> <public|private> <rank> [ICON]");
+            if (args.length < 5) return error(sender, "/facility team add <name> <public|private> <rank> [ICON] [prefix...]");
             boolean priv = args[3].equalsIgnoreCase("private");
             if (!priv && !args[3].equalsIgnoreCase("public")) return error(sender, "Type must be public or private.");
             Material icon = args.length >= 6 ? Material.matchMaterial(args[5]) : Material.PAPER;
             if (icon == null) icon = Material.PAPER;
-            teams.addOrUpdate(args[2], priv, args[4], icon);
+            // Anything after the icon is the chat prefix (supports & colours + spaces).
+            String prefix = args.length >= 7 ? String.join(" ", java.util.Arrays.copyOfRange(args, 6, args.length)) : "";
+            teams.addOrUpdate(args[2], priv, args[4], icon, prefix);
             sender.sendMessage(Component.text("Team '" + args[2].toLowerCase(Locale.ROOT) + "' saved ("
-                + (priv ? "private" : "public") + ", rank " + args[4] + ", icon " + icon.name() + ").",
+                + (priv ? "private" : "public") + ", rank " + args[4] + ", icon " + icon.name()
+                + (prefix.isBlank() ? "" : ", prefix " + prefix) + "). Edit permissions in config.yml.",
                 NamedTextColor.AQUA));
             return true;
         }

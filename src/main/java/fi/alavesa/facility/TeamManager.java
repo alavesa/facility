@@ -32,22 +32,53 @@ public final class TeamManager {
         this.plugin = plugin;
     }
 
-    /** (Re)read every team from config.yml. */
+    /** (Re)read every team from config.yml, then push each team's rank/prefix/
+     *  permissions into LuckPerms so the groups match the config. */
     public void load() {
         teams.clear();
         ConfigurationSection root = plugin.getConfig().getConfigurationSection("teams");
-        if (root == null) return;
-        for (String id : root.getKeys(false)) {
-            ConfigurationSection sec = root.getConfigurationSection(id);
-            if (sec == null) continue;
-            String key = id.toLowerCase(Locale.ROOT);
-            String display = sec.getString("display", "&f" + id);
-            boolean priv = "private".equalsIgnoreCase(sec.getString("type", "public"));
-            String rank = sec.getString("rank", key);
-            Material icon = Material.matchMaterial(sec.getString("icon", "PAPER"));
-            if (icon == null) icon = Material.PAPER;
-            teams.put(key, new Team(key, display, priv, rank, icon));
+        if (root != null) {
+            for (String id : root.getKeys(false)) {
+                ConfigurationSection sec = root.getConfigurationSection(id);
+                if (sec == null) continue;
+                String key = id.toLowerCase(Locale.ROOT);
+                String display = sec.getString("display", "&f" + id);
+                boolean priv = "private".equalsIgnoreCase(sec.getString("type", "public"));
+                String rank = sec.getString("rank", key);
+                Material icon = Material.matchMaterial(sec.getString("icon", "PAPER"));
+                if (icon == null) icon = Material.PAPER;
+                String prefix = sec.getString("prefix", "");
+                List<String> perms = sec.getStringList("permissions");
+                teams.put(key, new Team(key, display, priv, rank, icon, prefix, perms));
+            }
         }
+        syncGroups();
+    }
+
+    /**
+     * Make every team's LuckPerms GROUP match its config: create the group,
+     * have it inherit `default` (so putting a user into it doesn't strip base
+     * perms), set the chat prefix, and grant the listed permissions. Idempotent,
+     * so editing config.yml + /facility reload re-applies. No-op without LuckPerms.
+     */
+    private void syncGroups() {
+        if (Bukkit.getPluginManager().getPlugin("LuckPerms") == null) return;
+        for (Team team : teams.values()) {
+            lp("creategroup " + team.rank());
+            lp("group " + team.rank() + " parent add default");
+            if (team.hasPrefix()) {
+                lp("group " + team.rank() + " meta setprefix 100 \"" + team.prefix() + "\"");
+            }
+            for (String perm : team.permissions()) {
+                if (perm != null && !perm.isBlank()) {
+                    lp("group " + team.rank() + " permission set " + perm.trim() + " true");
+                }
+            }
+        }
+    }
+
+    private void lp(String args) {
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "lp " + args);
     }
 
     public java.util.Collection<Team> all() {
@@ -64,8 +95,9 @@ public final class TeamManager {
 
     // --- admin mutation -----------------------------------------------------
 
-    /** Add or update a team, persisting to config.yml. */
-    public void addOrUpdate(String id, boolean priv, String rank, Material icon) {
+    /** Add or update a team, persisting to config.yml. A blank prefix keeps any
+     *  existing one; permissions are preserved across updates (edit in config). */
+    public void addOrUpdate(String id, boolean priv, String rank, Material icon, String prefix) {
         String key = id.toLowerCase(Locale.ROOT);
         String path = "teams." + key;
         Team existing = teams.get(key);
@@ -73,6 +105,11 @@ public final class TeamManager {
         plugin.getConfig().set(path + ".type", priv ? "private" : "public");
         plugin.getConfig().set(path + ".rank", rank);
         plugin.getConfig().set(path + ".icon", icon.name());
+        String newPrefix = (prefix != null && !prefix.isBlank()) ? prefix
+            : (existing != null ? existing.prefix() : "");
+        plugin.getConfig().set(path + ".prefix", newPrefix);
+        plugin.getConfig().set(path + ".permissions",
+            existing != null ? existing.permissions() : new ArrayList<String>());
         plugin.saveConfig();
         load();
     }
@@ -119,16 +156,20 @@ public final class TeamManager {
     }
 
     /**
-     * Put the player into the team's LuckPerms rank via the console
-     * `lp user <name> parent set <rank>` fallback. Console-command based on
-     * purpose: no LuckPerms API dependency, robust whether or not it's loaded.
+     * Put the player into the team's LuckPerms group. The group already carries
+     * the team's prefix + permissions (see {@link #syncGroups}), so `parent set`
+     * hands the player the rank, the prefix and the perms in one move. The group
+     * inherits `default`, so this doesn't strip their base permissions.
+     *
+     * Console-command based on purpose: no LuckPerms API dependency, robust
+     * whether or not it's loaded. Absent LuckPerms, it no-ops and we log it.
      */
     public void applyRank(Player player, Team team) {
-        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
-            "lp user " + player.getName() + " parent set " + team.rank());
         if (Bukkit.getPluginManager().getPlugin("LuckPerms") == null) {
             plugin.getLogger().warning("LuckPerms not present - '" + player.getName()
-                + "' would have been set to rank '" + team.rank() + "'.");
+                + "' would have joined rank '" + team.rank() + "' (prefix + perms skipped).");
+            return;
         }
+        lp("user " + player.getName() + " parent set " + team.rank());
     }
 }

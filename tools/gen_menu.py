@@ -124,17 +124,21 @@ def screen(header):
 
 
 def button_bar(c, row, label, accent):
-    """A full-width gray button bar across one grid row, screenshot-style."""
+    """A full-width beveled gray button bar (DonutSMP /settings look): light top
+    + left edge, dark bottom + right edge, gray face, thin colour accent on the
+    left, white centered label. 16px tall inside the 18px row -> a small gap
+    between stacked buttons."""
     x = GRID_X
-    y = GRID_Y + row * CELL
-    w, h = CONTENT_W, CELL
-    c.fill(x, y + 1, w, h - 2, BTN_FACE)
-    c.fill(x, y + 1, w, 1, BTN_TOP)
-    c.fill(x, y + h - 2, w, 1, BTN_BOT)
-    c.box(x, y, w, h, BTN_EDGE)
-    c.fill(x + 2, y + 2, 3, h - 4, accent)        # left accent stripe
-    c.fill(x + w - 5, y + 2, 3, h - 4, accent)    # right accent stripe
-    c.text_centered(x + w // 2, y + 5, label, LABEL, scale=2)
+    y = GRID_Y + row * CELL + 1
+    w, h = CONTENT_W, CELL - 2                     # 162 x 16, 1px gap top/bottom
+    c.fill(x, y, w, h, BTN_FACE)
+    c.fill(x, y, w, 1, BTN_TOP)                    # top highlight
+    c.fill(x, y, 1, h, BTN_TOP)                    # left highlight
+    c.fill(x, y + h - 1, w, 1, BTN_BOT)           # bottom shadow
+    c.fill(x + w - 1, y, 1, h, BTN_BOT)           # right shadow
+    c.box(x, y, w, h, BTN_EDGE)                    # dark outline
+    c.fill(x + 2, y + 2, 2, h - 4, accent)        # thin left accent
+    c.text_centered(x + w // 2, y + (h - 10) // 2, label, LABEL, scale=2)
 
 
 def team_well(c, row, col):
@@ -148,11 +152,11 @@ def team_well(c, row, col):
 base = os.path.join(os.path.dirname(__file__), "..", "resource-pack", "assets", "facility")
 tex_font = os.path.join(base, "textures", "font")
 
-# ---- main menu: PLAY (row 1) + SELECT TEAM (row 3) --------------------------
+# ---- main menu: PLAY + SELECT TEAM stacked as a tidy list -------------------
 m = screen("SITE-19 // MAIN MENU")
 button_bar(m, 1, "PLAY", PLAY_AC)
-button_bar(m, 3, "SELECT TEAM", TEAM_AC)
-m.text(8, GRID_Y + 5 * CELL + 4, "AWAITING ENTRY", (70, 110, 100, 255), scale=2)
+button_bar(m, 2, "SELECT TEAM", TEAM_AC)
+m.text_centered(88, GRID_Y + 5 * CELL + 4, "AWAITING ENTRY", (70, 110, 100, 255), scale=2)
 m.png(os.path.join(tex_font, "menu_bg.png"))
 
 # ---- team selector: header + two rows of icon wells (slots 10.. / 19..) -----

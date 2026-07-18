@@ -16,30 +16,53 @@ lobby:
 combat:
   seconds: 15
 
-# Teams. type: public = anyone may join; private = must be granted first
-# (see /facility grant). rank = the LuckPerms group set on the player when
-# they join the team. icon = the Material shown in the team selector.
+# Teams. Joining a team ACTUALLY confers three things, applied through
+# LuckPerms when the player picks it:
+#   rank        - the LuckPerms group the player is put into (the group is
+#                 auto-created, inherits `default`, and is kept in sync with the
+#                 prefix + permissions below on every load / /facility reload).
+#   prefix      - the chat prefix set on that group (supports & colour codes).
+#   permissions - permission nodes granted to that group.
+# Also:
+#   type   - public = anyone may join; private = must be granted (/facility grant).
+#   icon   - the Material shown in the team selector.
+#   display- the coloured name shown on the icon.
+#
+# These are working EXAMPLES - edit them (or add your own with
+# /facility team add <name> <public|private> <rank> [ICON] [prefix...]).
 teams:
-  guards:
-    display: "&bGuards"
-    type: public
-    rank: guard
-    icon: IRON_CHESTPLATE
   classd:
     display: "&eClass-D"
     type: public
     rank: classd
     icon: ORANGE_WOOL
+    prefix: "&e[D-Class] "
+    permissions:
+      - facility.team.classd
+  guard:
+    display: "&9Security"
+    type: public
+    rank: guard
+    icon: IRON_CHESTPLATE
+    prefix: "&9[Security] "
+    permissions:
+      - facility.team.guard
   scientist:
     display: "&fFoundation Staff"
     type: public
     rank: scientist
     icon: LEATHER_CHESTPLATE
+    prefix: "&f[Staff] "
+    permissions:
+      - facility.team.scientist
   mtf:
     display: "&cMTF Epsilon-11"
     type: private
     rank: mtf
     icon: NETHERITE_HELMET
+    prefix: "&c[MTF] "
+    permissions:
+      - facility.team.mtf
 
 # Per-team grant list for PRIVATE teams. Managed at runtime by
 # /facility grant|revoke - each entry is a player UUID. Do not hand-edit

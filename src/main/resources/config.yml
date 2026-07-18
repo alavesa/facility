@@ -21,8 +21,6 @@ combat:
 #                     damage) after /menu before the menu reopens. The initial
 #                     join-lock still opens the menu immediately; only manual
 #                     re-entry uses this hold. Default 10.
-#   lock-ops        - whether ops are subject to the join-lock. Default false;
-#                     a player already in CREATIVE is NEVER locked regardless.
 #   elements        - the ordered contents of the main dialog. Each element is
 #                     one of:
 #                       {type: button, label: "<&-coloured>", action: "<command>"}
@@ -30,9 +28,18 @@ combat:
 #                     A button runs its command (no leading slash) on click; a
 #                     text element is a body line. Edit with /facility menu ...
 #                     or the chest GUI editor (/facility menu edit).
+#   music           - a sound played while a player sits in the main menu, and
+#                     re-played every `interval-minutes`. `sound` is any sound
+#                     key (a vanilla one, or a custom one you add to the resource
+#                     pack, e.g. facility:menu_theme). Stops on PLAY / leaving.
 menu:
   reentry-seconds: 10
-  lock-ops: false
+  music:
+    enabled: true
+    sound: "minecraft:music_disc.chirp"
+    interval-minutes: 3
+    volume: 1.0
+    pitch: 1.0
   elements:
     - {type: button, label: "&a&l▶ PLAY", action: "facility continue"}
     - {type: button, label: "&bSELECT TEAM", action: "facility teams"}

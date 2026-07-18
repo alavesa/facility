@@ -1,5 +1,8 @@
 package fi.alavesa.facility;
 
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.sound.SoundStop;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -58,6 +61,9 @@ public final class LobbyManager implements Listener {
     /** In-flight re-entry stand-still holds (from /menu), keyed by player. */
     private final Map<UUID, BukkitTask> reentryHolds = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Looping main-menu music tasks, keyed by player (one per player in menu). */
+    private final Map<UUID, BukkitTask> musicTasks = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
      *  crashed) CCTV session. namespace = plugin name lowercased = "terminal". */
     private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
@@ -74,14 +80,20 @@ public final class LobbyManager implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         continued.remove(player.getUniqueId());   // every session starts locked
-        // Lock a tick later so other join handlers (and the client) settle first.
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> lock(player), 5L);
+        // Swiftly freeze the arrival: spectator IMMEDIATELY (unless exempt) so
+        // they can't move/act while the client settles, then open the menu a
+        // couple of ticks later once other join handlers have run.
+        if (!inCctv(player) && player.getGameMode() != GameMode.CREATIVE) {
+            player.setGameMode(GameMode.SPECTATOR);
+        }
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> lock(player), 2L);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         cancelReentry(player, null);
+        stopMusic(player);
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())
@@ -132,6 +144,54 @@ public final class LobbyManager implements Listener {
         Location vantage = lobbyVantage(player);
         if (vantage != null) player.teleport(vantage);
         openMainMenu(player);
+        startMusic(player);
+    }
+
+    // --- main-menu music ----------------------------------------------------
+
+    /**
+     * Play the configured menu track now and loop it every
+     * {@code menu.music.interval-minutes} while the player is still in the menu.
+     * {@code menu.music.sound} is any sound key - a vanilla one or a custom one
+     * added to the resource pack. No-op / cheap if disabled.
+     */
+    private void startMusic(Player player) {
+        stopMusic(player);   // never stack two loops
+        if (!plugin.getConfig().getBoolean("menu.music.enabled", true)) return;
+        String soundName = plugin.getConfig().getString("menu.music.sound", "").trim();
+        if (soundName.isEmpty()) return;
+        final Key key;
+        try { key = Key.key(soundName); } catch (Exception invalid) {
+            plugin.getLogger().warning("menu.music.sound '" + soundName + "' is not a valid sound key.");
+            return;
+        }
+        float volume = (float) plugin.getConfig().getDouble("menu.music.volume", 1.0);
+        float pitch = (float) plugin.getConfig().getDouble("menu.music.pitch", 1.0);
+        double minutes = Math.max(0.05, plugin.getConfig().getDouble("menu.music.interval-minutes", 3.0));
+        long periodTicks = Math.max(20L, (long) (minutes * 60.0 * 20.0));
+        Sound sound = Sound.sound(key, Sound.Source.MUSIC, volume, pitch);
+
+        player.playSound(sound);   // immediately
+        BukkitTask task = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+            // Still online AND still in the menu? Otherwise stop the loop.
+            if (!player.isOnline() || continued.contains(player.getUniqueId())
+                || player.getGameMode() != GameMode.SPECTATOR) {
+                stopMusic(player);
+                return;
+            }
+            player.playSound(sound);
+        }, periodTicks, periodTicks);
+        musicTasks.put(player.getUniqueId(), task);
+    }
+
+    /** Stop the menu music loop and silence the current track. */
+    private void stopMusic(Player player) {
+        BukkitTask task = musicTasks.remove(player.getUniqueId());
+        if (task != null) task.cancel();
+        String soundName = plugin.getConfig().getString("menu.music.sound", "").trim();
+        if (!soundName.isEmpty() && player.isOnline()) {
+            try { player.stopSound(SoundStop.named(Key.key(soundName))); } catch (Exception ignored) { }
+        }
     }
 
     /** Open the custom main menu (a native /dialog GUI). The dialog itself is
@@ -230,6 +290,7 @@ public final class LobbyManager implements Listener {
     /** The Continue button lands here. Return them to the world and unlock. */
     public void continueInto(Player player) {
         cancelReentry(player, null);
+        stopMusic(player);
         continued.add(player.getUniqueId());
         player.closeInventory();
 

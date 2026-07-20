@@ -34,12 +34,15 @@ NUDGE_CHAR  = ""   # small negative advance
 PANEL_CHAR  = ""   # the panel bitmap glyph
 
 # ---- blind-tuning constants (need in-game screenshot tuning) ----------------
-PANEL_W, PANEL_H = 300, 210      # the panel bitmap size in px (bigger: covers the whole menu)
-ASCENT           = 8             # baseline offset; raises/lowers the panel
-# CENTERED panel: DialogMenu emits REWIND + PANEL + REWIND, so two half-width
-# rewinds cancel the panel's own advance (net 0 = no dialog-widening) AND leave
-# the panel drawn symmetrically around screen centre, backing the buttons.
-REWIND_ADVANCE   = -(PANEL_W // 2)
+# The bitmap is drawn small but SCALED UP by the font's height field to a huge
+# on-screen size, so it blankets the entire screen (world hidden behind the
+# menu) without a giant PNG. RENDER is the on-screen size in px.
+PANEL_W, PANEL_H = 200, 200      # the native bitmap size (kept square)
+RENDER           = 1000          # on-screen size after scaling (covers any screen)
+ASCENT           = RENDER // 2   # centre it vertically (it overflows top+bottom)
+# CENTERED: DialogMenu emits REWIND + PANEL + REWIND; two half-render rewinds
+# cancel the panel's advance (net 0 = no dialog-widening) and centre it.
+REWIND_ADVANCE   = -(RENDER // 2)
 NUDGE_ADVANCE    = -1            # 1px fine nudge (repeat the char to shift more)
 
 # ---- palette: dark SITE-19 facility panel -----------------------------------
@@ -82,20 +85,15 @@ class Canvas:
 
 
 def build_panel():
+    # A full-screen SITE-19 terminal backdrop. Near-opaque so the world is hidden
+    # behind the menu. Drawn small, scaled up by the font height - so keep detail
+    # coarse (thin lines become a clean frame at screen scale).
     c = Canvas(PANEL_W, PANEL_H)
-    c.fill(0, 0, c.w, c.h, PANEL)
-    for y in range(2, c.h - 2, 2):                 # scanlines over the whole panel
-        c.fill(2, y, c.w - 4, 1, SCAN)
-    c.box(0, 0, c.w, c.h, EDGE)                     # cyan outer frame
-    c.box(2, 2, c.w - 4, c.h - 4, INNER)           # dim inner frame
-    c.fill(4, 4, c.w - 8, 10, (10, 30, 28, 255))   # header band
-    # hazard stripe along the bottom edge
-    for x in range(6, c.w - 6, 8):
-        c.fill(x, c.h - 8, 4, 4, HAZ_B)
-        c.fill(x + 4, c.h - 8, 4, 4, HAZ_A)
-    # a couple of corner ticks for the "facility screen" read
-    c.fill(6, 6, 12, 2, HEADER)
-    c.fill(c.w - 18, 6, 12, 2, AMBER)
+    c.fill(0, 0, c.w, c.h, (8, 11, 15, 252))       # near-opaque dark screen
+    for y in range(0, c.h, 3):                      # faint scanlines
+        c.fill(0, y, c.w, 1, SCAN)
+    c.box(0, 0, c.w, c.h, EDGE)                     # cyan frame around the screen edge
+    c.box(1, 1, c.w - 2, c.h - 2, INNER)           # dim inner frame
     return c
 
 
@@ -108,7 +106,7 @@ font = {
     "providers": [
         {"type": "space", "advances": {REWIND_CHAR: REWIND_ADVANCE, NUDGE_CHAR: NUDGE_ADVANCE}},
         {"type": "bitmap", "file": "facility:font/dialog_bg.png",
-         "ascent": ASCENT, "height": PANEL_H, "chars": [PANEL_CHAR]},
+         "ascent": ASCENT, "height": RENDER, "chars": [PANEL_CHAR]},
     ]
 }
 os.makedirs(os.path.join(out, "font"), exist_ok=True)

@@ -22,7 +22,7 @@ server (github.com/alavesa). Paper plugin, targets `paper-api 1.21.4-R0.1-SNAPSH
 ## Build
 
 ```
-cd /Users/piia/Facility
+cd ~/Facility
 mvn -q package       # -> target/Facility-0.1.0.jar
 ```
 
@@ -50,8 +50,8 @@ Alias: `/fac`.
    - Without DeluxeMenus the plugin uses its own built-in chest menus.
    - Without LuckPerms the rank grants no-op (logged as a warning).
 3. Rebuild the server resource pack so the menu background ships:
-   - Add `/Users/piia/Facility/resource-pack` to the `SOURCES` list in
-     `/Users/piia/Lab/tools/build-pack.sh`, then run it. The pack namespace is
+   - Add `~/Facility/resource-pack` to the `SOURCES` list in
+     `~/Lab/tools/build-pack.sh`, then run it. The pack namespace is
      `facility` and won't collide with anything.
    - Regenerate the background asset any time with `python3 tools/gen_menu.py`.
 

@@ -64,6 +64,10 @@ public final class LobbyManager implements Listener {
     /** Players who joined and still need the menu (until they press PLAY). */
     private final Set<UUID> pendingMenu = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
+    /** Players who just died: their next PLAY deploys at a team spawn, not their
+     *  old position. A normal rejoin (no death) returns to where they were. */
+    private final Set<UUID> deadPendingSpawn = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
 
 
     /** Terminal's CCTV crash-backup PDC key; its presence means an active (or
@@ -86,8 +90,15 @@ public final class LobbyManager implements Listener {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
         continued.remove(id);   // every session starts locked
-        // Exempt sessions (CCTV / creative) never get the lobby.
-        if (inCctv(player) || player.getGameMode() == GameMode.CREATIVE) return;
+        // Only two things skip the lobby: an active Terminal CCTV session, or a
+        // player with facility.bypass (grant it to building admins). CREATIVE is
+        // no longer auto-exempt - that was silently skipping the menu for admins
+        // who test in creative, which read as "the menu won't open on rejoin".
+        if (inCctv(player) || player.hasPermission("facility.bypass")) {
+            plugin.getLogger().info("[Facility] join: " + player.getName() + " skips the lobby (cctv/bypass).");
+            return;
+        }
+        plugin.getLogger().info("[Facility] join: " + player.getName() + " -> opening lobby menu.");
         beginMenu(player);
     }
 
@@ -136,6 +147,7 @@ public final class LobbyManager implements Listener {
         cancelReentry(player, null);
         stopMusic(player);
         pendingMenu.remove(player.getUniqueId());
+        deadPendingSpawn.remove(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
         // and never a CCTV spectator session (Terminal owns that restore).
         if (continued.contains(player.getUniqueId())
@@ -155,8 +167,9 @@ public final class LobbyManager implements Listener {
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         if (inCctv(player)) return;   // don't hijack a CCTV session
-        // The player pressed Respawn after dying (or a combat-log kill): send
-        // them to the main menu now that the respawn screen is gone.
+        // They died: next PLAY should use the team spawn, not their old position.
+        deadPendingSpawn.add(player.getUniqueId());
+        // Send them to the main menu now that the respawn screen is gone.
         continued.remove(player.getUniqueId());
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 2L);
     }
@@ -360,14 +373,21 @@ public final class LobbyManager implements Listener {
      *                        they pick, via {@link #continueTo})
      */
     public void continueInto(Player player) {
-        String teamId = store.getTeam(player.getUniqueId());
+        UUID id = player.getUniqueId();
+        // A normal rejoin (they didn't die) returns EXACTLY where they logged out
+        // - inventory and position preserved. Only a fresh deploy (first join, or
+        // just died) uses the team spawns.
+        Location last = store.lastLocation(id);
+        if (last != null && !deadPendingSpawn.remove(id)) {
+            continueTo(player, last);
+            return;
+        }
+        deadPendingSpawn.remove(id);
+        String teamId = store.getTeam(id);
         java.util.List<TeamManager.SpawnPoint> spawns =
             teamId == null ? java.util.List.of() : teams.getSpawns(teamId);
-
         if (spawns.isEmpty()) {
-            Location dest = store.lastLocation(player.getUniqueId());
-            if (dest == null) dest = player.getWorld().getSpawnLocation();
-            continueTo(player, dest);
+            continueTo(player, player.getWorld().getSpawnLocation());
         } else if (spawns.size() == 1) {
             continueTo(player, spawns.get(0).loc());
         } else if (teams.getSpawnMode(teamId).equalsIgnoreCase("choose")) {

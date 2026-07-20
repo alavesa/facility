@@ -1,5 +1,5 @@
 name: Facility
-version: '0.4.14'
+version: '0.4.15'
 main: fi.alavesa.facility.FacilityPlugin
 api-version: '1.21'
 author: Piia Alavesa
@@ -22,3 +22,6 @@ permissions:
   facility.admin:
     description: Add/remove teams, grant/revoke private-team access, reload config
     default: op
+  facility.bypass:
+    description: Skip the lobby menu on join (for building admins). NOT default - grant it explicitly.
+    default: false

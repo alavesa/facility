@@ -131,4 +131,39 @@ public final class PlayerStore {
         cfg.set("combatlog.pending", null);
         write(id, cfg);
     }
+
+    // --- combat stats -------------------------------------------------------
+
+    public int kills(UUID id)  { return read(id).getInt("stats.kills", 0); }
+    public int deaths(UUID id) { return read(id).getInt("stats.deaths", 0); }
+
+    public void addKill(UUID id) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("stats.kills", cfg.getInt("stats.kills", 0) + 1);
+        write(id, cfg);
+    }
+
+    public void addDeath(UUID id) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("stats.deaths", cfg.getInt("stats.deaths", 0) + 1);
+        write(id, cfg);
+    }
+
+    /** Kill/death ratio (deaths treated as at least 1 so a clean sheet still reads sensibly). */
+    public double kd(UUID id) {
+        int k = kills(id), d = deaths(id);
+        return d == 0 ? k : Math.round(k / (double) d * 100.0) / 100.0;
+    }
+
+    // --- last area (set by AreaManager, shown in stats + tab) ---------------
+
+    public void setLastArea(UUID id, String area) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("last-area", area);
+        write(id, cfg);
+    }
+
+    public String lastArea(UUID id) {
+        return read(id).getString("last-area", null);
+    }
 }

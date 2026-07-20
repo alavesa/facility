@@ -62,6 +62,10 @@ public final class DialogMenu {
         show(player, teamsDialog(player));
     }
 
+    public void openStats(Player player) {
+        show(player, statsDialog(player));
+    }
+
     /** Let the player pick which of their team's spawns to deploy at. Each button
      *  runs {@code facility spawn <index>}; a «Back returns to the main menu. */
     public void openSpawnChoice(Player player, java.util.List<TeamManager.SpawnPoint> spawns) {
@@ -107,6 +111,9 @@ public final class DialogMenu {
                 actions.append(button(legacy(el.label()), el.action()));
             }
         }
+        // Always offer the stats screen, regardless of the operator's button list.
+        if (actions.length() > 0) actions.append(",");
+        actions.append(button(Component.text("Stats", NamedTextColor.YELLOW), "facility stats"));
         return dialog("SITE-19 // MAIN MENU", String.join(",", body), actions.toString());
     }
 
@@ -125,6 +132,29 @@ public final class DialogMenu {
         String body = "{type:\"minecraft:plain_message\",contents:"
             + json(Component.text("Choose your team.", NamedTextColor.GRAY)) + "}";
         return dialog("SELECT TEAM", body, actions.toString());
+    }
+
+    /** The player's combat record: kills, deaths, K/D, last team and last area. */
+    private String statsDialog(Player player) {
+        java.util.UUID id = player.getUniqueId();
+        PlayerStore st = plugin.store();
+        String teamId = st.getTeam(id);
+        Team team = teamId == null ? null : teams.get(teamId);
+        String lastArea = st.lastArea(id);
+        java.util.List<String> body = new java.util.ArrayList<>();
+        body.add(statLine("Kills", Component.text(st.kills(id), NamedTextColor.GREEN)));
+        body.add(statLine("Deaths", Component.text(st.deaths(id), NamedTextColor.RED)));
+        body.add(statLine("K/D", Component.text(String.valueOf(st.kd(id)), NamedTextColor.AQUA)));
+        body.add(statLine("Last played as", team != null ? legacy(team.display())
+            : Component.text("—", NamedTextColor.DARK_GRAY)));
+        body.add(statLine("Last area", Component.text(lastArea == null ? "—" : lastArea, NamedTextColor.AQUA)));
+        String actions = button(Component.text("« Back", NamedTextColor.GRAY), "facility back");
+        return dialog("YOUR RECORD", String.join(",", body), actions);
+    }
+
+    private String statLine(String label, Component value) {
+        Component c = Component.text(label + ": ", NamedTextColor.GRAY).append(value);
+        return "{type:\"minecraft:plain_message\",contents:" + json(c) + "}";
     }
 
     /** The background as a body element: the panel glyph, preceded by the

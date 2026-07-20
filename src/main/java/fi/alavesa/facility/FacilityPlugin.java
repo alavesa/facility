@@ -39,8 +39,12 @@ public final class FacilityPlugin extends JavaPlugin {
     private MenuStore menuStore;
     private MenuEditor menuEditor;
     private BlackoutManager blackout;
+    private AreaManager areas;
 
     private NamespacedKey teamKey;
+
+    public PlayerStore store() { return store; }
+    public AreaManager areas() { return areas; }
 
     @Override
     public void onEnable() {
@@ -57,12 +61,16 @@ public final class FacilityPlugin extends JavaPlugin {
         lobby = new LobbyManager(this, store, dialogMenu, teams, combat);
         menuEditor = new MenuEditor(this, menuStore);
         blackout = new BlackoutManager(this);
+        areas = new AreaManager(this);
 
         getServer().getPluginManager().registerEvents(lobby, this);
         getServer().getPluginManager().registerEvents(combat, this);
         getServer().getPluginManager().registerEvents(menuEditor, this);
+        getServer().getPluginManager().registerEvents(new StatsListener(store), this);
         // The countdown bar ticks every 5 ticks (4 Hz) for smooth drain.
         getServer().getScheduler().runTaskTimer(this, combat, 20L, 5L);
+        // Area effects / last-area / tab readout, once a second.
+        getServer().getScheduler().runTaskTimer(this, new AreaTask(this, areas, store), 40L, 20L);
 
         getLogger().info("==================================");
         getLogger().info("  SITE-19 FACILITY // ONLINE");
@@ -129,6 +137,15 @@ public final class FacilityPlugin extends JavaPlugin {
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
                 lobby.reopenMain(player);
                 return true;
+            }
+            case "stats" -> {
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                dialogMenu.openStats(player);
+                return true;
+            }
+            case "area" -> {
+                return handleArea(sender, args);
             }
             case "spawn" -> {
                 // Spawn-picker button: deploy the player at their chosen spawn.
@@ -464,6 +481,66 @@ public final class FacilityPlugin extends JavaPlugin {
         dialogMenu.openTeams(player);
     }
 
+    private boolean handleArea(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+        if (!(sender instanceof Player player)) return error(sender, "Players only.");
+        String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
+        switch (sub) {
+            case "pos1" -> { areas.setPos1(player); return ok(sender, "Corner 1 set where you stand."); }
+            case "pos2" -> { areas.setPos2(player); return ok(sender, "Corner 2 set where you stand."); }
+            case "create" -> {
+                if (args.length < 3) return error(sender, "/facility area create <name>");
+                String problem = areas.create(player, args[2]);
+                if (problem != null) return error(sender, problem);
+                return ok(sender, "Area '" + args[2] + "' created. Add effects with /facility area effect "
+                    + args[2] + " <EFFECT:amp>, or /facility area scp008 " + args[2] + " on.");
+            }
+            case "remove" -> {
+                if (args.length < 3) return error(sender, "/facility area remove <name>");
+                return areas.remove(args[2]) ? ok(sender, "Removed area '" + args[2] + "'.")
+                    : error(sender, "No area named '" + args[2] + "'.");
+            }
+            case "list" -> {
+                var all = areas.all();
+                if (all.isEmpty()) return ok(sender, "No areas defined yet.");
+                for (var a : all) {
+                    sender.sendMessage(Component.text("• " + a.name() + "  [" + a.world() + "]  "
+                        + (a.scp008() ? "SCP-008 " : "") + a.effects(), NamedTextColor.GRAY));
+                }
+                return true;
+            }
+            case "effect" -> {
+                if (args.length < 4) return error(sender, "/facility area effect <name> <EFFECT:amplifier>");
+                String problem = areas.addEffect(args[2], args[3]);
+                if (problem != null) return error(sender, problem);
+                return ok(sender, "Added effect " + args[3] + " to '" + args[2] + "'.");
+            }
+            case "cleareffects" -> {
+                if (args.length < 3) return error(sender, "/facility area cleareffects <name>");
+                areas.clearEffects(args[2]);
+                return ok(sender, "Cleared effects on '" + args[2] + "'.");
+            }
+            case "scp008" -> {
+                if (args.length < 4) return error(sender, "/facility area scp008 <name> <on|off>");
+                boolean on = args[3].equalsIgnoreCase("on");
+                return areas.setScp008(args[2], on) ? ok(sender, "SCP-008 infection " + (on ? "on" : "off")
+                    + " for '" + args[2] + "'.") : error(sender, "No area named '" + args[2] + "'.");
+            }
+            default -> {
+                sender.sendMessage(Component.text(
+                    "/facility area pos1|pos2 | create <name> | remove <name> | list | "
+                    + "effect <name> <EFFECT:amp> | cleareffects <name> | scp008 <name> <on|off>",
+                    NamedTextColor.AQUA));
+                return true;
+            }
+        }
+    }
+
+    private boolean ok(CommandSender sender, String msg) {
+        sender.sendMessage(Component.text(msg, NamedTextColor.GRAY));
+        return true;
+    }
+
     // --- tab completion -----------------------------------------------------
 
     @Override
@@ -471,8 +548,8 @@ public final class FacilityPlugin extends JavaPlugin {
         boolean admin = sender.hasPermission("facility.admin");
         return switch (args.length) {
             case 1 -> {
-                List<String> top = new ArrayList<>(List.of("continue", "teams", "team"));
-                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout"));
+                List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats"));
+                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
@@ -486,6 +563,8 @@ public final class FacilityPlugin extends JavaPlugin {
                 case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
                     "move", "setlabel", "setaction"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
+                case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "list",
+                    "effect", "cleareffects", "scp008"), args[1]) : List.of();
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {

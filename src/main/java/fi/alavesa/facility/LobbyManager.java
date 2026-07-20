@@ -283,13 +283,13 @@ public final class LobbyManager implements Listener {
      */
     public void returnToMenu(Player player) {
         if (inCctv(player)) {
-            player.sendActionBar(Component.text("Not while jacked into CCTV.", NamedTextColor.RED));
+            Msg.actionbar(player, Component.text("Not while jacked into CCTV.", NamedTextColor.RED));
             return;
         }
         // /menu must never be a combat/damage escape: refuse it outright while
         // combat-tagged (the whole reason the stand-still hold exists).
         if (combat.isTagged(player.getUniqueId())) {
-            player.sendActionBar(Component.text("You can't return to the menu while in combat.",
+            Msg.actionbar(player, Component.text("You can't return to the menu while in combat.",
                 NamedTextColor.RED));
             return;
         }
@@ -325,7 +325,7 @@ public final class LobbyManager implements Listener {
                 return;
             }
             int remain = (int) Math.ceil(remainMs / 1000.0);
-            player.sendActionBar(Component.text("Returning to menu in " + remain
+            Msg.actionbar(player, Component.text("Returning to menu in " + remain
                 + "s... hold still", NamedTextColor.AQUA));
         }, 0L, 5L);   // 4 Hz, smooth countdown
         reentryHolds.put(player.getUniqueId(), task);
@@ -336,7 +336,7 @@ public final class LobbyManager implements Listener {
         BukkitTask task = reentryHolds.remove(player.getUniqueId());
         if (task != null) task.cancel();
         if (reason != null && player.isOnline()) {
-            player.sendActionBar(Component.text(reason, NamedTextColor.RED));
+            Msg.actionbar(player, Component.text(reason, NamedTextColor.RED));
         }
     }
 

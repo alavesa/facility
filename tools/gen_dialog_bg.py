@@ -34,9 +34,12 @@ NUDGE_CHAR  = ""   # small negative advance
 PANEL_CHAR  = ""   # the panel bitmap glyph
 
 # ---- blind-tuning constants (need in-game screenshot tuning) ----------------
-PANEL_W, PANEL_H = 256, 160      # the panel bitmap size in px
+PANEL_W, PANEL_H = 300, 210      # the panel bitmap size in px (bigger: covers the whole menu)
 ASCENT           = 8             # baseline offset; raises/lowers the panel
-REWIND_ADVANCE   = -PANEL_W - 4  # pull the cursor back the panel width (+slack)
+# CENTERED panel: DialogMenu emits REWIND + PANEL + REWIND, so two half-width
+# rewinds cancel the panel's own advance (net 0 = no dialog-widening) AND leave
+# the panel drawn symmetrically around screen centre, backing the buttons.
+REWIND_ADVANCE   = -(PANEL_W // 2)
 NUDGE_ADVANCE    = -1            # 1px fine nudge (repeat the char to shift more)
 
 # ---- palette: dark SITE-19 facility panel -----------------------------------

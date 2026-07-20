@@ -131,10 +131,14 @@ public final class DialogMenu {
      *  negative-space rewind (and optional fine nudges) in the facility:dialog
      *  font. The offsets are blind pixel work; tune with an in-game screenshot. */
     private String bgBodyElement() {
+        // REWIND + PANEL + REWIND: the two half-width rewinds cancel the panel's
+        // own advance (so it doesn't widen the dialog) and leave it centered on
+        // screen, backing the button column. BG_NUDGE fine-tunes X (repeat it).
         StringBuilder glyphs = new StringBuilder();
         glyphs.append(BG_REWIND);
         for (int i = 0; i < BG_NUDGE_COUNT; i++) glyphs.append(BG_NUDGE);
         glyphs.append(BG_PANEL);
+        glyphs.append(BG_REWIND);
         Component bg = Component.text(glyphs.toString())
             .font(BG_FONT).color(NamedTextColor.WHITE);
         return "{type:\"minecraft:plain_message\",contents:" + json(bg) + "}";

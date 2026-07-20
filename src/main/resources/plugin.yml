@@ -1,5 +1,5 @@
 name: Facility
-version: '0.4.16'
+version: '0.4.17'
 main: fi.alavesa.facility.FacilityPlugin
 api-version: '1.21'
 description: Main menu / lobby / teams / combat-log system for the SITE-19 SCP prison RP server.

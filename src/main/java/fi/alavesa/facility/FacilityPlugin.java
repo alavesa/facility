@@ -486,8 +486,16 @@ public final class FacilityPlugin extends JavaPlugin {
         if (!(sender instanceof Player player)) return error(sender, "Players only.");
         String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
         switch (sub) {
-            case "pos1" -> { areas.setPos1(player); return ok(sender, "Corner 1 set where you stand."); }
-            case "pos2" -> { areas.setPos2(player); return ok(sender, "Corner 2 set where you stand."); }
+            case "pos1" -> {
+                int[] c = areas.setPos1(player);
+                return c == null ? error(sender, "Look at a block (within 100), then run the command.")
+                    : ok(sender, "Corner 1 set to the block you're looking at: " + c[0] + ", " + c[1] + ", " + c[2] + ".");
+            }
+            case "pos2" -> {
+                int[] c = areas.setPos2(player);
+                return c == null ? error(sender, "Look at a block (within 100), then run the command.")
+                    : ok(sender, "Corner 2 set to the block you're looking at: " + c[0] + ", " + c[1] + ", " + c[2] + ".");
+            }
             case "create" -> {
                 if (args.length < 3) return error(sender, "/facility area create <name>");
                 String problem = areas.create(player, args[2]);

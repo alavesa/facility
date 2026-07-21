@@ -66,12 +66,17 @@ public final class AreaManager {
 
     // --- selection ----------------------------------------------------------
 
-    public void setPos1(Player p) { pos1.put(p.getUniqueId(), coords(p)); }
-    public void setPos2(Player p) { pos2.put(p.getUniqueId(), coords(p)); }
+    /** Set corner 1/2 to the block the player is LOOKING AT. Returns the chosen
+     *  coords, or null if they're not aiming at a block (so the caller can report it). */
+    public int[] setPos1(Player p) { int[] c = targetCoords(p); if (c != null) pos1.put(p.getUniqueId(), c); return c; }
+    public int[] setPos2(Player p) { int[] c = targetCoords(p); if (c != null) pos2.put(p.getUniqueId(), c); return c; }
 
-    private int[] coords(Player p) {
-        Location l = p.getLocation();
-        return new int[]{l.getBlockX(), l.getBlockY(), l.getBlockZ()};
+    /** The block the player is looking at (up to 100 blocks - so you can point at
+     *  a far wall/floor to mark a corner), or null if the line of sight hits only air. */
+    private int[] targetCoords(Player p) {
+        org.bukkit.block.Block b = p.getTargetBlockExact(100);
+        if (b == null) return null;
+        return new int[]{b.getX(), b.getY(), b.getZ()};
     }
 
     /** Create/replace an area from the caller's pos1+pos2. Returns null on success, else why not. */

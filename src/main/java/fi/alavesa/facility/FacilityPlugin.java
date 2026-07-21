@@ -127,6 +127,7 @@ public final class FacilityPlugin extends JavaPlugin {
             case "teams", "selector" -> {
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                lobby.menuInteracted(player);   // stop join re-sends from clobbering this dialog
                 openTeams(player);
                 return true;
             }
@@ -135,12 +136,14 @@ public final class FacilityPlugin extends JavaPlugin {
                 // stand-still hold (the player is already in the menu).
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                lobby.menuInteracted(player);   // stop join re-sends from clobbering this dialog
                 lobby.reopenMain(player);
                 return true;
             }
             case "stats" -> {
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                lobby.menuInteracted(player);   // stop join re-sends from clobbering this dialog
                 dialogMenu.openStats(player);
                 return true;
             }

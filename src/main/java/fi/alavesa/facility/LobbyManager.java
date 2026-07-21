@@ -142,6 +142,21 @@ public final class LobbyManager implements Listener {
         }, delayTicks);
     }
 
+    /**
+     * Stop the join-menu retries for a player who has NAVIGATED into a dialog
+     * option (Teams / Stats / Back). The three fixed re-sends in {@link #beginMenu}
+     * exist only to guarantee the FIRST main-menu open lands on a client that
+     * isn't ready yet - but if a later re-send fires while the player is already
+     * inside the Teams (or Stats) dialog, it replaces that dialog with the main
+     * menu and kicks them out. Clearing pendingMenu makes {@link #scheduleShow}
+     * no-op, so /dialog is never re-shown over a menu the player has opened. The
+     * player is in spectator either way; the only thing that changed is that they
+     * left the main menu for a sub-dialog, which is exactly when we must not re-open.
+     */
+    public void menuInteracted(Player player) {
+        pendingMenu.remove(player.getUniqueId());
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();

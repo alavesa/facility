@@ -138,6 +138,7 @@ public final class LobbyManager implements Listener {
                 if (vantage != null) player.teleport(vantage);
             }
             openMainMenu(player);
+            startMusic(player);   // ambient plays while they sit in the menu (idempotent)
         }, delayTicks);
     }
 
@@ -214,7 +215,7 @@ public final class LobbyManager implements Listener {
      * added to the resource pack. No-op / cheap if disabled.
      */
     private void startMusic(Player player) {
-        stopMusic(player);   // never stack two loops
+        if (musicTasks.containsKey(player.getUniqueId())) return;   // already looping - idempotent
         if (!plugin.getConfig().getBoolean("menu.music.enabled", true)) return;
         String soundName = plugin.getConfig().getString("menu.music.sound", "").trim();
         if (soundName.isEmpty()) return;

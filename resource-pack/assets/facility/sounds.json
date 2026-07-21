@@ -1,0 +1,9 @@
+{
+  "menu.ambient": {
+    "category": "music",
+    "subtitle": "Site-19 // standby",
+    "sounds": [
+      { "name": "facility:menu_ambient", "stream": true }
+    ]
+  }
+}

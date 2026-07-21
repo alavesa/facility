@@ -42,8 +42,12 @@ menu:
     enabled: false
   music:
     enabled: true
-    sound: "minecraft:music_disc.chirp"
-    interval-minutes: 3
+    # The custom Site-19 ambient drone, shipped in the resource pack
+    # (assets/facility/sounds/menu_ambient.ogg). Any sound key works - swap in a
+    # vanilla track or your own. The loop re-plays every interval; the ambient is
+    # ~30s, so half a minute keeps it seamless. Stops when the player presses PLAY.
+    sound: "facility:menu.ambient"
+    interval-minutes: 0.5
     volume: 1.0
     pitch: 1.0
   elements:

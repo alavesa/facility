@@ -419,6 +419,7 @@ public final class LobbyManager implements Listener {
         cancelReentry(player, null);
         pendingMenu.remove(player.getUniqueId());
         stopMusic(player);
+        player.clearTitle();   // remove the menu-background subtitle before they deploy
         continued.add(player.getUniqueId());
         player.closeInventory();
         player.setGameMode(store.lastGameMode(player.getUniqueId()));

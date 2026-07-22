@@ -56,6 +56,20 @@ public final class DialogMenu {
 
     public void openMain(Player player) {
         show(player, mainDialog());
+        showBackground(player);
+    }
+
+    /** The custom main-menu background, painted as a custom-textured SUBTITLE glyph
+     *  BEHIND the dialog - instead of an extra button/element inside the dialog, so
+     *  the full background shows. Long stay time (the player sits in the menu); it's
+     *  cleared on PLAY (LobbyManager.continueTo calls player.clearTitle()). */
+    public void showBackground(Player player) {
+        if (!plugin.getConfig().getBoolean("menu.background.enabled", true)) return;
+        Component glyph = Component.text(String.valueOf(BG_PANEL)).font(BG_FONT)
+            .color(NamedTextColor.WHITE);
+        player.showTitle(net.kyori.adventure.title.Title.title(Component.empty(), glyph,
+            net.kyori.adventure.title.Title.Times.times(java.time.Duration.ZERO,
+                java.time.Duration.ofMinutes(5), java.time.Duration.ZERO)));
     }
 
     public void openTeams(Player player) {
@@ -97,11 +111,9 @@ public final class DialogMenu {
      *  malformed element can never appear here (MenuStore skips them). */
     private String mainDialog() {
         java.util.List<String> body = new java.util.ArrayList<>();
-        // The custom background is opt-out: if the menu ever fails to render,
-        // flip menu.background.enabled to false to rule the glyph in or out.
-        if (plugin.getConfig().getBoolean("menu.background.enabled", false)) {
-            body.add(bgBodyElement());
-        }
+        // The custom background is no longer an in-dialog element (a button/body line
+        // shrank/clipped it); it's now a full custom-textured SUBTITLE behind the
+        // dialog - see showBackground(), sent from openMain().
         StringBuilder actions = new StringBuilder();
         for (MenuElement el : menu.elements()) {
             if (el.type() == MenuElement.Type.TEXT) {

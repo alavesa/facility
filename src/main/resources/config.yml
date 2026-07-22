@@ -39,7 +39,9 @@ menu:
   # the prime suspect for it failing to render, so we ship the plain (known-good)
   # dialog. Set to true to try the custom panel once its positioning is dialled in.
   background:
-    enabled: false
+    # The custom main-menu background, shown as a full custom-textured SUBTITLE
+    # behind the dialog (not an in-dialog element any more). Set false to hide it.
+    enabled: true
   music:
     enabled: true
     # The custom Site-19 ambient drone, shipped in the resource pack

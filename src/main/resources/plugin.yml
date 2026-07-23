@@ -15,8 +15,8 @@ commands:
     description: Return to the SITE-19 main menu
     usage: /menu
   stash:
-    description: Open your personal stash, or move credits in/out of it
-    usage: /stash | deposit <n> | withdraw <n> | place | remove
+    description: Open your stash; ops place/remove physical stashes
+    usage: /stash | place | remove
 permissions:
   facility.use:
     description: Use the lobby menu, continue into the world, and pick a public team

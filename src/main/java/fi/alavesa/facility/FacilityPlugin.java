@@ -104,31 +104,11 @@ public final class FacilityPlugin extends JavaPlugin {
     /** /stash - open your personal stash, move credits in/out of it, or (op) place/remove a stash. */
     private boolean handleStash(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) return error(sender, "Players only.");
-        if (args.length == 0) { stashes.open(player); return true; }
+        if (args.length == 0) { stashes.openPersonal(player); return true; }
         switch (args[0].toLowerCase()) {
-            case "deposit", "dep" -> {
-                int amt = amount(args, 1);
-                if (amt <= 0) return error(sender, "/stash deposit <amount>");
-                if (!stashes.deposit(player, amt)) return error(sender,
-                    "Not enough credits in your balance (" + stashes.balance(player) + ").");
-                sender.sendMessage(Component.text("Stashed " + amt + " credits.  Stash: "
-                    + stashes.stashCredits(player) + "  |  Balance: " + stashes.balance(player),
-                    NamedTextColor.GOLD));
-                return true;
-            }
-            case "withdraw", "wd" -> {
-                int amt = amount(args, 1);
-                if (amt <= 0) return error(sender, "/stash withdraw <amount>");
-                if (!stashes.withdraw(player, amt)) return error(sender,
-                    "Not enough credits in your stash (" + stashes.stashCredits(player) + ").");
-                sender.sendMessage(Component.text("Withdrew " + amt + " credits.  Balance: "
-                    + stashes.balance(player) + "  |  Stash: " + stashes.stashCredits(player),
-                    NamedTextColor.GOLD));
-                return true;
-            }
             case "place" -> {
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
-                return stashes.place(player) ? ok(sender, "Stash placed. Right-click it to open your stash.")
+                return stashes.place(player) ? ok(sender, "Stash placed. Right-click it to open it.")
                     : error(sender, "Look at a block within 6 blocks to place the stash.");
             }
             case "remove" -> {
@@ -137,16 +117,11 @@ public final class FacilityPlugin extends JavaPlugin {
                     : error(sender, "Look at a stash to remove it.");
             }
             default -> {
-                sender.sendMessage(Component.text(
-                    "/stash  (open) | deposit <n> | withdraw <n> | place | remove", NamedTextColor.GOLD));
+                sender.sendMessage(Component.text("/stash  (open your stash) | place | remove",
+                    NamedTextColor.GOLD));
                 return true;
             }
         }
-    }
-
-    private int amount(String[] args, int idx) {
-        if (args.length <= idx) return -1;
-        try { return Integer.parseInt(args[idx].trim()); } catch (NumberFormatException e) { return -1; }
     }
 
     @Override

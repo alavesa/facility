@@ -40,6 +40,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private MenuEditor menuEditor;
     private BlackoutManager blackout;
     private AreaManager areas;
+    private StashManager stashes;
 
     private NamespacedKey teamKey;
 
@@ -67,6 +68,9 @@ public final class FacilityPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(combat, this);
         getServer().getPluginManager().registerEvents(menuEditor, this);
         getServer().getPluginManager().registerEvents(new StatsListener(store), this);
+        stashes = new StashManager(this);
+        getServer().getPluginManager().registerEvents(stashes, this);
+        getServer().getScheduler().runTaskTimer(this, stashes::sweepOrphans, 200L, 1200L);
         // The countdown bar ticks every 5 ticks (4 Hz) for smooth drain.
         getServer().getScheduler().runTaskTimer(this, combat, 20L, 5L);
         // Area effects / last-area / tab readout, once a second.
@@ -97,6 +101,54 @@ public final class FacilityPlugin extends JavaPlugin {
 
     // --- commands -----------------------------------------------------------
 
+    /** /stash - open your personal stash, move credits in/out of it, or (op) place/remove a stash. */
+    private boolean handleStash(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) return error(sender, "Players only.");
+        if (args.length == 0) { stashes.open(player); return true; }
+        switch (args[0].toLowerCase()) {
+            case "deposit", "dep" -> {
+                int amt = amount(args, 1);
+                if (amt <= 0) return error(sender, "/stash deposit <amount>");
+                if (!stashes.deposit(player, amt)) return error(sender,
+                    "Not enough credits in your balance (" + stashes.balance(player) + ").");
+                sender.sendMessage(Component.text("Stashed " + amt + " credits.  Stash: "
+                    + stashes.stashCredits(player) + "  |  Balance: " + stashes.balance(player),
+                    NamedTextColor.GOLD));
+                return true;
+            }
+            case "withdraw", "wd" -> {
+                int amt = amount(args, 1);
+                if (amt <= 0) return error(sender, "/stash withdraw <amount>");
+                if (!stashes.withdraw(player, amt)) return error(sender,
+                    "Not enough credits in your stash (" + stashes.stashCredits(player) + ").");
+                sender.sendMessage(Component.text("Withdrew " + amt + " credits.  Balance: "
+                    + stashes.balance(player) + "  |  Stash: " + stashes.stashCredits(player),
+                    NamedTextColor.GOLD));
+                return true;
+            }
+            case "place" -> {
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                return stashes.place(player) ? ok(sender, "Stash placed. Right-click it to open your stash.")
+                    : error(sender, "Look at a block within 6 blocks to place the stash.");
+            }
+            case "remove" -> {
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                return stashes.removeLooked(player) ? ok(sender, "Stash removed.")
+                    : error(sender, "Look at a stash to remove it.");
+            }
+            default -> {
+                sender.sendMessage(Component.text(
+                    "/stash  (open) | deposit <n> | withdraw <n> | place | remove", NamedTextColor.GOLD));
+                return true;
+            }
+        }
+    }
+
+    private int amount(String[] args, int idx) {
+        if (args.length <= idx) return -1;
+        try { return Integer.parseInt(args[idx].trim()); } catch (NumberFormatException e) { return -1; }
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         // /menu - return to the main menu by hand (the only OTHER way to reach
@@ -106,6 +158,9 @@ public final class FacilityPlugin extends JavaPlugin {
             if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
             lobby.returnToMenu(player);
             return true;
+        }
+        if (command.getName().equalsIgnoreCase("stash")) {
+            return handleStash(sender, args);
         }
         if (args.length == 0) return usage(sender);
         switch (args[0].toLowerCase(Locale.ROOT)) {

@@ -272,10 +272,12 @@ public final class StashManager implements Listener {
                 new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
             d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
         });
-        at.getWorld().spawn(at.clone().add(0, 0.1, 0), Interaction.class, i -> {
+        // Box sits ON the spawner block, one pixel (1/16) proud on every side, so you can
+        // click anywhere on the block - not just the top edge where it used to poke out.
+        at.getWorld().spawn(spot.getLocation().add(0.5, -0.0625, 0.5), Interaction.class, i -> {
             i.addScoreboardTag(TAG_STASH);
-            i.setInteractionWidth(1.0f);
-            i.setInteractionHeight(1.2f);
+            i.setInteractionWidth(1.125f);
+            i.setInteractionHeight(1.125f);
             i.setResponsive(true);          // so a left-click registers as an attack (op punch-remove)
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
             i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, blockKey(spot));

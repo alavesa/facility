@@ -6,7 +6,7 @@
 
   <groupId>fi.alavesa</groupId>
   <artifactId>facility-plugin</artifactId>
-  <version>0.4.32</version>
+  <version>0.4.33</version>
   <packaging>jar</packaging>
 
   <name>Facility</name>
@@ -35,5 +35,11 @@
 
   <build>
     <finalName>Facility-${project.version}</finalName>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
   </build>
 </project>

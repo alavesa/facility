@@ -171,6 +171,7 @@ public final class LobbyManager implements Listener {
             && !inCctv(player)) {
             store.saveLogout(player);
         }
+        setMenuFlag(player, false);   // don't leave the credits HUD suppressed for next join
         continued.remove(player.getUniqueId());
     }
 
@@ -202,6 +203,7 @@ public final class LobbyManager implements Listener {
         // else - ops included - goes through the lobby and just presses PLAY.
         if (player.getGameMode() == GameMode.CREATIVE) {
             continued.add(player.getUniqueId());   // treat as already in-world
+            setMenuFlag(player, false);            // they skip the menu - HUD stays visible
             return;
         }
         forceLock(player);

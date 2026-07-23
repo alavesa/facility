@@ -95,6 +95,10 @@ public final class DialogMenu {
     }
 
     private void show(Player player, String snbt) {
+        // ANY open dialog (main, teams, stats, spawn) means the player is in the menu:
+        // publish facility.menu=1 so Labra's credits HUD yields the title layer to it,
+        // instead of the two overlapping/alternating. Cleared when the player deploys.
+        setMenuFlag(player, true);
         boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
             "dialog show " + player.getName() + " " + snbt);
         if (!ok) {
@@ -102,6 +106,18 @@ public final class DialogMenu {
                 + " - does this server support the /dialog command (MC 1.21.6+)? The menu can't open."
                 + " If /dialog is missing or the schema differs on your build, tell the developer.");
         }
+    }
+
+    /** Publish/clear facility.menu on the main scoreboard so Labra's credits HUD knows to
+     *  stop drawing its title while the player has any menu dialog open. */
+    static void setMenuFlag(Player player, boolean on) {
+        try {
+            var board = Bukkit.getScoreboardManager().getMainScoreboard();
+            var o = board.getObjective("facility.menu");
+            if (o == null) o = board.registerNewObjective("facility.menu",
+                org.bukkit.scoreboard.Criteria.DUMMY, Component.text("facility.menu"));
+            o.getScore(player.getName()).setScore(on ? 1 : 0);
+        } catch (Exception ignored) { }
     }
 
     // --- dialog builders ----------------------------------------------------

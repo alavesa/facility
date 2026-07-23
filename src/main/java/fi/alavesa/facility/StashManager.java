@@ -252,32 +252,61 @@ public final class StashManager implements Listener {
     public boolean place(Player player) {
         var ray = player.rayTraceBlocks(6.0);
         if (ray == null || ray.getHitBlock() == null || ray.getHitBlockFace() == null) return false;
-        Location at = ray.getHitBlock().getRelative(ray.getHitBlockFace()).getLocation().add(0.5, 0.0, 0.5);
+        org.bukkit.block.Block spot = ray.getHitBlock().getRelative(ray.getHitBlockFace());
+        if (!spot.getType().isAir() && !spot.isReplaceable()) return false;  // don't clobber a real block
+
+        // A REAL mob-spawner block, so the recognisable cage-with-a-spinning-skeleton model
+        // shows (a BlockDisplay only draws the near-invisible empty cage). Spawning is fully
+        // disabled - it's decoration + storage, never a mob source.
+        spot.setType(Material.SPAWNER);
+        if (spot.getState() instanceof org.bukkit.block.CreatureSpawner cs) {
+            cs.setSpawnedType(org.bukkit.entity.EntityType.SKELETON);
+            cs.setSpawnCount(0);                 // never actually spawns a mob
+            cs.setMaxNearbyEntities(0);
+            cs.setRequiredPlayerRange(16);        // still shows the spinning skeleton up close
+            cs.setMinSpawnDelay(Integer.MAX_VALUE);
+            cs.setMaxSpawnDelay(Integer.MAX_VALUE);
+            cs.update(true, false);
+        }
+
         String stashId = UUID.randomUUID().toString();
-        BlockDisplay model = at.getWorld().spawn(at.clone().add(0, 0.05, 0), BlockDisplay.class, d -> {
-            d.setBlock(Material.SPAWNER.createBlockData());
-            d.addScoreboardTag(TAG_STASH);
-            float sc = 0.9f;
-            d.setTransformation(new org.bukkit.util.Transformation(
-                new org.joml.Vector3f(-sc / 2f, 0f, -sc / 2f), new org.joml.Quaternionf(),
-                new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
-        });
-        at.getWorld().spawn(at.clone().add(0, 0.1, 0), Interaction.class, i -> {
+        Location at = spot.getLocation().add(0.5, 0.05, 0.5);
+        at.getWorld().spawn(at, Interaction.class, i -> {
             i.addScoreboardTag(TAG_STASH);
             i.setInteractionWidth(1.0f);
             i.setInteractionHeight(1.0f);
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
-            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, model.getUniqueId().toString());
+            // store the spawner block's location, so removal/orphan-sweep can clear it
+            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, blockKey(spot));
         });
         return true;
     }
 
-    /** Remove the stash the player is looking at (both the box + the model). */
+    private String blockKey(org.bukkit.block.Block b) {
+        return b.getWorld().getName() + ":" + b.getX() + ":" + b.getY() + ":" + b.getZ();
+    }
+    private org.bukkit.block.Block blockFromKey(String key) {
+        try {
+            String[] p = key.split(":");
+            var w = Bukkit.getWorld(p[0]);
+            if (w == null) return null;
+            return w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+        } catch (Exception e) { return null; }
+    }
+    private void clearStashBlock(String key) {
+        org.bukkit.block.Block b = key == null ? null : blockFromKey(key);
+        if (b != null && b.getType() == Material.SPAWNER) b.setType(Material.AIR);
+    }
+
+    /** Remove the stash the player is looking at (the box + its spawner block). */
     private boolean removeAt(Entity hit) {
         if (hit == null || !hit.getScoreboardTags().contains(TAG_STASH)) return false;
+        if (hit instanceof Interaction box) {
+            clearStashBlock(box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING));
+        }
         Location at = hit.getLocation();
         for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
-            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();
+            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();   // legacy BlockDisplay too
         }
         return true;
     }
@@ -318,8 +347,10 @@ public final class StashManager implements Listener {
         for (var world : Bukkit.getWorlds()) {
             for (Interaction box : world.getEntitiesByClass(Interaction.class)) {
                 if (!box.getScoreboardTags().contains(TAG_STASH)) continue;
-                String modelId = box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING);
-                if (modelId == null || Bukkit.getEntity(UUID.fromString(modelId)) == null) box.remove();
+                String key = box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING);
+                org.bukkit.block.Block b = key == null ? null : blockFromKey(key);
+                // its spawner block was broken (or it's a legacy display-linked box) -> clean it up
+                if (b == null || b.getType() != Material.SPAWNER) box.remove();
             }
         }
     }

@@ -25,6 +25,9 @@ public final class InteractCrosshair implements Runnable {
     private static final Component GLYPH = Component.text("")
         .font(Key.key("facility", "crosshair")).color(NamedTextColor.WHITE);
 
+    /** Font-pixel advance of the crosshair glyph (15px texture at height 100 -> ~16). */
+    private static final int GLYPH_WIDTH = 16;
+
     private final FacilityPlugin plugin;
     private final Set<UUID> hovering = ConcurrentHashMap.newKeySet();
 
@@ -38,10 +41,12 @@ public final class InteractCrosshair implements Runnable {
             boolean now = looksAtInteractable(p);
             boolean was = hovering.contains(p.getUniqueId());
             if (now) {
-                p.sendActionBar(GLYPH);
+                // Route through Labra's action-bar compositor so the highlight composes
+                // with the blink/sprint meters and reticle instead of alternating with them.
+                Msg.crosshair(p, GLYPH, GLYPH_WIDTH);
                 hovering.add(p.getUniqueId());
             } else if (was) {
-                p.sendActionBar(Component.empty());   // clear the highlight once
+                Msg.clearCrosshair(p);   // drop the highlight from the compositor once
                 hovering.remove(p.getUniqueId());
             }
         }

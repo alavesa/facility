@@ -157,11 +157,10 @@ public final class StashManager implements Listener {
 
     private void buyTile(Stash s, Player player, int slot) {
         int cost = tileCost(s);
-        // pay from the balance; if it's short, cash in physical credit coins/bills from
-        // the inventory first (so a 10-credit bill can buy a tile), then pay.
-        if (balance(player) < cost) depositCreditItems(player);
-        if (!takeCredits(player, cost)) {
-            player.sendActionBar(Component.text("Not enough credits (have " + balance(player)
+        // pay with the physical credit cash carried in the inventory (coins/bills), giving
+        // change if a bigger bill has to be broken.
+        if (!spendWallet(player, cost)) {
+            player.sendActionBar(Component.text("Not enough credits (have " + wallet(player)
                 + ", need " + cost + ").", NamedTextColor.RED));
             player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
             return;
@@ -171,7 +170,7 @@ public final class StashManager implements Listener {
         repaint(s);
         saveMeta(s);
         player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.4f);
-        player.sendActionBar(Component.text("Tile unlocked. Balance: " + balance(player), NamedTextColor.GOLD));
+        player.sendActionBar(Component.text("Tile unlocked. Wallet: " + wallet(player), NamedTextColor.GOLD));
     }
 
     @EventHandler
@@ -366,28 +365,77 @@ public final class StashManager implements Listener {
     }
     private String sanitize(String id) { return id.replaceAll("[^A-Za-z0-9_-]", "_"); }
 
-    /** Cash in every physical credit coin/bill in the player's inventory, adding its
-     *  value to the credit balance and removing the item. Lets a player pay for a tile
-     *  straight from bills in their pack without a separate deposit step. */
-    private void depositCreditItems(Player p) {
-        int gained = 0;
-        ItemStack[] contents = p.getInventory().getContents();
-        for (int i = 0; i < contents.length; i++) {
-            ItemStack it = contents[i];
+    /** Credits the player is physically carrying (coins/bills in the inventory). */
+    public int wallet(Player p) {
+        int total = 0;
+        for (ItemStack it : p.getInventory().getContents()) {
             int v = creditValue(it);
-            if (v <= 0) continue;
-            gained += v * it.getAmount();
-            p.getInventory().setItem(i, null);
+            if (v > 0) total += v * it.getAmount();
         }
-        if (gained > 0) setScore("credits", p.getName(), balance(p) + gained);
+        return total;
     }
 
-    public int balance(Player p) { return score("credits", p.getName()); }
-    private boolean takeCredits(Player p, int amount) {
-        int b = balance(p);
-        if (b < amount) return false;
-        setScore("credits", p.getName(), b - amount);
+    /** Spend {@code amount} of physical cash from the inventory, handing back change if a
+     *  bigger bill had to be broken. false (nothing removed) when they can't afford it. */
+    private boolean spendWallet(Player p, int amount) {
+        if (amount <= 0) return true;
+        if (wallet(p) < amount) return false;
+        int removed = 0;
+        // pass 1: take denominations without exceeding the amount (100 -> 10 -> 1)
+        for (int denom : new int[]{100, 10, 1}) {
+            ItemStack[] c = p.getInventory().getContents();
+            for (int i = 0; i < c.length && removed < amount; i++) {
+                if (creditValue(c[i]) != denom) continue;
+                while (c[i].getAmount() > 0 && removed + denom <= amount) {
+                    c[i].setAmount(c[i].getAmount() - 1);
+                    removed += denom;
+                }
+                p.getInventory().setItem(i, c[i].getAmount() > 0 ? c[i] : null);
+            }
+        }
+        // pass 2: break one bigger bill for the remainder
+        if (removed < amount) {
+            for (int denom : new int[]{10, 100, 1}) {
+                ItemStack[] c = p.getInventory().getContents();
+                for (int i = 0; i < c.length && removed < amount; i++) {
+                    if (creditValue(c[i]) != denom) continue;
+                    c[i].setAmount(c[i].getAmount() - 1);
+                    p.getInventory().setItem(i, c[i].getAmount() > 0 ? c[i] : null);
+                    removed += denom;
+                }
+                if (removed >= amount) break;
+            }
+        }
+        if (removed > amount) giveChange(p, removed - amount);
         return true;
+    }
+
+    /** Hand the player {@code amount} credits back as coins/bills (100s, 10s, 1s). */
+    private void giveChange(Player p, int amount) {
+        int rem = Math.max(0, amount);
+        while (rem >= 100) { addOrDrop(p, creditItem(Material.PAPER, "100 Credits",
+            NamedTextColor.DARK_GREEN, "lab_credit100")); rem -= 100; }
+        while (rem >= 10)  { addOrDrop(p, creditItem(Material.PAPER, "10 Credits",
+            NamedTextColor.GREEN, "lab_credit10")); rem -= 10; }
+        while (rem >= 1)   { addOrDrop(p, creditItem(Material.GOLD_NUGGET, "1 Credit",
+            NamedTextColor.GOLD, "lab_credit")); rem -= 1; }
+    }
+
+    private void addOrDrop(Player p, ItemStack item) {
+        p.getInventory().addItem(item).values()
+            .forEach(left -> p.getWorld().dropItemNaturally(p.getLocation(), left));
+    }
+
+    /** A credit coin/bill matching Labra's - the pack renders it from the model string. */
+    private ItemStack creditItem(Material mat, String name, NamedTextColor color, String model) {
+        ItemStack it = new ItemStack(mat);
+        ItemMeta m = it.getItemMeta();
+        m.itemName(Component.text(name, color).decoration(TextDecoration.ITALIC, false));
+        var cmd = m.getCustomModelDataComponent();
+        cmd.setStrings(List.of(model));
+        m.setCustomModelDataComponent(cmd);
+        it.setItemMeta(m);
+        return it;
     }
     private Objective obj(String id) {
         var board = Bukkit.getScoreboardManager().getMainScoreboard();

@@ -252,65 +252,47 @@ public final class StashManager implements Listener {
     public boolean place(Player player) {
         var ray = player.rayTraceBlocks(6.0);
         if (ray == null || ray.getHitBlock() == null || ray.getHitBlockFace() == null) return false;
-        org.bukkit.block.Block spot = ray.getHitBlock().getRelative(ray.getHitBlockFace());
-        if (!spot.getType().isAir() && !spot.isReplaceable()) return false;  // don't clobber a real block
-
-        // A REAL mob-spawner block, so the recognisable cage-with-a-spinning-skeleton model
-        // shows (a BlockDisplay only draws the near-invisible empty cage). Spawning is fully
-        // disabled - it's decoration + storage, never a mob source. Wrapped so that even if a
-        // spawner setter is picky on this MC build, the Interaction below STILL gets created
-        // (otherwise you'd get a spawner with no way to open it).
-        spot.setType(Material.SPAWNER);
-        try {
-            if (spot.getState() instanceof org.bukkit.block.CreatureSpawner cs) {
-                cs.setSpawnedType(org.bukkit.entity.EntityType.SKELETON);
-                cs.setSpawnCount(0);                 // never actually spawns a mob
-                cs.setRequiredPlayerRange(16);        // still shows the spinning skeleton up close
-                cs.update(true, false);
-            }
-        } catch (Throwable t) {
-            plugin.getLogger().warning("Stash spawner config skipped: " + t.getMessage());
-        }
-
+        Location at = ray.getHitBlock().getRelative(ray.getHitBlockFace()).getLocation().add(0.5, 0.0, 0.5);
         String stashId = UUID.randomUUID().toString();
-        Location at = spot.getLocation().add(0.5, 0.05, 0.5);
-        at.getWorld().spawn(at, Interaction.class, i -> {
+
+        // The cage: a spawner BlockDisplay. A BlockDisplay never animates the mob inside, so
+        // it stays STILL (no spinning), and we light it fully so the cage is clearly visible.
+        BlockDisplay cage = at.getWorld().spawn(at.clone().add(0, 0.05, 0), BlockDisplay.class, d -> {
+            d.setBlock(Material.SPAWNER.createBlockData());
+            d.addScoreboardTag(TAG_STASH);
+            float sc = 0.9f;
+            d.setTransformation(new org.bukkit.util.Transformation(
+                new org.joml.Vector3f(-sc / 2f, 0f, -sc / 2f), new org.joml.Quaternionf(),
+                new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
+            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
+        });
+        // A STILL skeleton skull floating in the cage - the "mob inside", never spinning.
+        at.getWorld().spawn(at.clone().add(0, 0.32, 0), org.bukkit.entity.ItemDisplay.class, d -> {
+            d.setItemStack(new ItemStack(Material.SKELETON_SKULL));
+            d.addScoreboardTag(TAG_STASH);
+            float sc = 0.55f;
+            d.setTransformation(new org.bukkit.util.Transformation(
+                new org.joml.Vector3f(0, 0, 0), new org.joml.Quaternionf(),
+                new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
+            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
+        });
+        at.getWorld().spawn(at.clone().add(0, 0.1, 0), Interaction.class, i -> {
             i.addScoreboardTag(TAG_STASH);
             i.setInteractionWidth(1.0f);
             i.setInteractionHeight(1.2f);
-            i.setResponsive(true);
+            i.setResponsive(true);          // so a left-click registers as an attack (op punch-remove)
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
-            // store the spawner block's location, so removal/orphan-sweep can clear it
-            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, blockKey(spot));
+            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, cage.getUniqueId().toString());
         });
         return true;
     }
 
-    private String blockKey(org.bukkit.block.Block b) {
-        return b.getWorld().getName() + ":" + b.getX() + ":" + b.getY() + ":" + b.getZ();
-    }
-    private org.bukkit.block.Block blockFromKey(String key) {
-        try {
-            String[] p = key.split(":");
-            var w = Bukkit.getWorld(p[0]);
-            if (w == null) return null;
-            return w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
-        } catch (Exception e) { return null; }
-    }
-    private void clearStashBlock(String key) {
-        org.bukkit.block.Block b = key == null ? null : blockFromKey(key);
-        if (b != null && b.getType() == Material.SPAWNER) b.setType(Material.AIR);
-    }
-
-    /** Remove the stash the player is looking at (the box + its spawner block). */
+    /** Remove the stash the player is looking at (box + cage + skull). */
     private boolean removeAt(Entity hit) {
         if (hit == null || !hit.getScoreboardTags().contains(TAG_STASH)) return false;
-        if (hit instanceof Interaction box) {
-            clearStashBlock(box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING));
-        }
         Location at = hit.getLocation();
         for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
-            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();   // legacy BlockDisplay too
+            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();
         }
         return true;
     }
@@ -320,16 +302,17 @@ public final class StashManager implements Listener {
         return ray != null && removeAt(ray.getHitEntity());
     }
 
-    /** Op PUNCH on a stash removes it. Uses the arm-swing animation (which fires
-     *  reliably when left-clicking an Interaction entity, unlike PlayerInteractEvent,
-     *  whose LEFT_CLICK_AIR the client withholds while an entity is under the cursor). */
+    /** Op PUNCH (left-click ATTACK) on a stash removes it. Uses the attack event, which -
+     *  unlike the arm-swing animation - fires ONLY on a left-click, never on the right-click
+     *  that opens the stash. The stash Interaction is setResponsive(true) so it's attackable. */
     @EventHandler(ignoreCancelled = false)
-    public void onPunch(org.bukkit.event.player.PlayerAnimationEvent event) {
-        if (event.getAnimationType() != org.bukkit.event.player.PlayerAnimationType.ARM_SWING) return;
+    public void onPunch(io.papermc.paper.event.player.PrePlayerAttackEntityEvent event) {
+        if (!(event.getAttacked() instanceof Interaction box)) return;
+        if (!box.getScoreboardTags().contains(TAG_STASH)) return;
         Player p = event.getPlayer();
-        if (!p.hasPermission("facility.admin")) return;
-        var ray = p.rayTraceEntities(6);
-        if (ray == null || !removeAt(ray.getHitEntity())) return;
+        if (!p.hasPermission("facility.admin")) { event.setCancelled(true); return; }
+        event.setCancelled(true);
+        removeAt(box);
         p.sendActionBar(Component.text("Stash removed.", NamedTextColor.GRAY));
         p.playSound(p.getLocation(), Sound.BLOCK_STONE_BREAK, 0.8f, 0.9f);
     }
@@ -351,10 +334,12 @@ public final class StashManager implements Listener {
         for (var world : Bukkit.getWorlds()) {
             for (Interaction box : world.getEntitiesByClass(Interaction.class)) {
                 if (!box.getScoreboardTags().contains(TAG_STASH)) continue;
-                String key = box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING);
-                org.bukkit.block.Block b = key == null ? null : blockFromKey(key);
-                // its spawner block was broken (or it's a legacy display-linked box) -> clean it up
-                if (b == null || b.getType() != Material.SPAWNER) box.remove();
+                String modelId = box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING);
+                Entity model = null;
+                try { if (modelId != null) model = Bukkit.getEntity(UUID.fromString(modelId)); }
+                catch (IllegalArgumentException ignored) { }
+                if (model == null) box.remove();   // its cage is gone -> clean up the orphan box
+
             }
         }
     }

@@ -16,10 +16,12 @@ import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -30,42 +32,48 @@ import org.bukkit.scoreboard.Objective;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Stashes: physical, ender-chest-style containers (a custom spawner-cage model) that
- * store a player's valuable items. Each placed stash is INDEPENDENT and PERSONAL -
- * what you put in one stash lives only in that stash, and every player sees their own
- * contents in it. You start with 3 usable tiles per stash and buy more (10, 20, 30,
- * +10 each). SCP items can't be stored. Physical CREDIT cash you leave in a stash is
- * tallied into your "stash credits" HUD counter, shown under your wallet.
+ * Stashes: physical, ender-chest-style containers (a custom spawner-cage model). Each
+ * placed stash is INDEPENDENT and PERSONAL - what you put in one stash lives only in
+ * that stash, and every player sees their own contents in it. The stash opens as a
+ * 27-slot grid; you start with 3 usable tiles in the CENTRE and buy the tiles AROUND
+ * them, growing the storage outward (10, 20, 30 credits, +10 each). SCP items can't be
+ * stored. Physical credit cash left in a stash is tallied into the stash-credit HUD.
  */
 public final class StashManager implements Listener {
 
     public static final String TAG_STASH = "facility.stash";
-    private static final int SIZE = 27;          // 3 rows
-    private static final int FREE_TILES = 3;
+    private static final int SIZE = 27;                 // 3 rows x 9 cols
+    private static final int COLS = 9;
+    /** The 3 free centre tiles (middle row, centre three columns). */
+    private static final Set<Integer> CENTRE = Set.of(12, 13, 14);
     private static final String PERSONAL = "personal";
 
     private final FacilityPlugin plugin;
     private final File dir;
     private final NamespacedKey stashIdKey;
+    private final NamespacedKey modelKey;
 
     public StashManager(FacilityPlugin plugin) {
         this.plugin = plugin;
         this.dir = new File(plugin.getDataFolder(), "stashes");
         if (!dir.exists()) dir.mkdirs();
         this.stashIdKey = new NamespacedKey(plugin, "stash_id");
+        this.modelKey = new NamespacedKey(plugin, "stash_model");
     }
 
-    /** Our stash GUI holder - remembers whose stash and which one. */
+    /** GUI holder - whose stash, which one, and which tiles are unlocked. */
     private static final class Stash implements InventoryHolder {
         final UUID owner;
         final String stashId;
-        int unlocked;
+        final Set<Integer> unlocked;
         Inventory inv;
-        Stash(UUID owner, String stashId, int unlocked) {
+        Stash(UUID owner, String stashId, Set<Integer> unlocked) {
             this.owner = owner; this.stashId = stashId; this.unlocked = unlocked;
         }
         @Override public Inventory getInventory() { return inv; }
@@ -74,40 +82,59 @@ public final class StashManager implements Listener {
     // ------------------------------------------------------------- open / render
     public void open(Player player, String stashId) {
         YamlConfiguration cfg = load(player.getUniqueId(), stashId);
-        int unlocked = Math.max(FREE_TILES, Math.min(SIZE, cfg.getInt("unlocked", FREE_TILES)));
-        Stash holder = new Stash(player.getUniqueId(), stashId, unlocked);
-        Inventory inv = Bukkit.createInventory(holder, SIZE,
-            Component.text("Stash", NamedTextColor.DARK_AQUA));
-        holder.inv = inv;
-        for (int i = 0; i < unlocked; i++) {
-            ItemStack it = cfg.getItemStack("slot." + i);
-            if (it != null) inv.setItem(i, it);
+        Set<Integer> unlocked = new HashSet<>(cfg.getIntegerList("unlocked"));
+        if (unlocked.isEmpty()) unlocked.addAll(CENTRE);   // fresh stash: the 3 centre tiles
+        Stash s = new Stash(player.getUniqueId(), stashId, unlocked);
+        Inventory inv = Bukkit.createInventory(s, SIZE, Component.text("Stash", NamedTextColor.DARK_AQUA));
+        s.inv = inv;
+        for (int slot : unlocked) {
+            ItemStack it = cfg.getItemStack("slot." + slot);
+            if (it != null) inv.setItem(slot, it);
         }
-        paintLocked(holder);
+        repaint(s);
         player.openInventory(inv);
     }
 
-    /** Fill the locked area: the FIRST locked slot is a "buy for N" button, the rest
-     *  are plain locked panes. Called on open and after each purchase. */
-    private void paintLocked(Stash s) {
-        for (int i = s.unlocked; i < SIZE; i++) {
-            if (i == s.unlocked) {
+    /** Redraw the non-storage decoration: BUY buttons on tiles adjacent to unlocked
+     *  ones, plain locked panes everywhere else. Unlocked tiles are left as storage. */
+    private void repaint(Stash s) {
+        int cost = tileCost(s);
+        for (int i = 0; i < SIZE; i++) {
+            if (s.unlocked.contains(i)) continue;          // storage tile - leave the item
+            if (isBuyable(i, s.unlocked)) {
                 s.inv.setItem(i, named(Material.GOLD_NUGGET,
-                    Component.text("Buy this tile - " + tileCost(s.unlocked) + " credits",
-                        NamedTextColor.GOLD),
-                    List.of(line("Click to unlock another storage tile."),
-                        line("Cost rises by 10 credits per tile."))));
+                    Component.text("Buy this tile — " + cost + " credits", NamedTextColor.GOLD),
+                    List.of(line("Click to unlock this storage tile."),
+                        line("Each new tile costs 10 more."))));
             } else {
                 s.inv.setItem(i, named(Material.GRAY_STAINED_GLASS_PANE,
-                    Component.text("Locked tile", NamedTextColor.DARK_GRAY),
-                    List.of(line("Buy the earlier tiles first."))));
+                    Component.text("Locked", NamedTextColor.DARK_GRAY),
+                    List.of(line("Buy an adjacent tile first."))));
             }
         }
     }
 
-    /** Cost to unlock the next tile: 10 for the 4th, 20 for the 5th, ... (+10 each). */
-    private int tileCost(int unlocked) {
-        return 10 * (unlocked - FREE_TILES + 1);
+    /** A tile is buyable if it's not unlocked but borders an unlocked tile (4-dir). */
+    private boolean isBuyable(int slot, Set<Integer> unlocked) {
+        if (unlocked.contains(slot)) return false;
+        for (int n : neighbours(slot)) if (unlocked.contains(n)) return true;
+        return false;
+    }
+
+    /** 4-directional neighbours of a slot within the grid (no row wrap). */
+    private int[] neighbours(int slot) {
+        int row = slot / COLS, col = slot % COLS;
+        java.util.List<Integer> out = new java.util.ArrayList<>(4);
+        if (row > 0) out.add(slot - COLS);
+        if (row < SIZE / COLS - 1) out.add(slot + COLS);
+        if (col > 0) out.add(slot - 1);
+        if (col < COLS - 1) out.add(slot + 1);
+        return out.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    /** Cost of the NEXT tile: 10 for the 4th tile, 20 for the 5th, ... (+10 each). */
+    private int tileCost(Stash s) {
+        return 10 * (s.unlocked.size() - CENTRE.size() + 1);
     }
 
     // ------------------------------------------------------------- clicks
@@ -118,38 +145,37 @@ public final class StashManager implements Listener {
         int raw = event.getRawSlot();
         boolean inStash = raw >= 0 && raw < SIZE;
 
-        // the buy button
-        if (inStash && raw == s.unlocked && s.unlocked < SIZE) {
-            event.setCancelled(true);
-            int cost = tileCost(s.unlocked);
-            if (!takeCredits(player, cost)) {
-                player.sendActionBar(Component.text("Not enough credits (" + balance(player)
-                    + "/" + cost + ").", NamedTextColor.RED));
-                player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
-                return;
-            }
-            s.unlocked++;
-            s.inv.setItem(raw, null);              // free the newly-unlocked slot
-            paintLocked(s);
-            saveMeta(s);
-            player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.4f);
-            player.sendActionBar(Component.text("Tile unlocked. Balance: " + balance(player),
-                NamedTextColor.GOLD));
+        if (inStash && !s.unlocked.contains(raw)) {
+            event.setCancelled(true);                       // can't use a non-unlocked tile
+            if (isBuyable(raw, s.unlocked)) buyTile(s, player, raw);
             return;
         }
-        // locked tiles are inert
-        if (inStash && raw > s.unlocked) { event.setCancelled(true); return; }
-        if (inStash && raw >= s.unlocked) { event.setCancelled(true); return; }
-
-        // block storing SCPs, then re-tally credits next tick (covers every click path)
+        // a click in an unlocked tile (or the player inventory) - let it through, but
+        // sweep out any SCP next tick and re-tally credits (covers every click path)
         Bukkit.getScheduler().runTask(plugin, () -> { bounceScps(s, player); retally(player); });
+    }
+
+    private void buyTile(Stash s, Player player, int slot) {
+        int cost = tileCost(s);
+        if (!takeCredits(player, cost)) {
+            player.sendActionBar(Component.text("Not enough credits (" + balance(player)
+                + "/" + cost + ").", NamedTextColor.RED));
+            player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
+            return;
+        }
+        s.unlocked.add(slot);
+        s.inv.setItem(slot, null);                          // free the newly-unlocked tile
+        repaint(s);
+        saveMeta(s);
+        player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.4f);
+        player.sendActionBar(Component.text("Tile unlocked. Balance: " + balance(player), NamedTextColor.GOLD));
     }
 
     @EventHandler
     public void onDrag(InventoryDragEvent event) {
         if (!(event.getInventory().getHolder() instanceof Stash s)) return;
         for (int slot : event.getRawSlots()) {
-            if (slot < SIZE && slot >= s.unlocked) { event.setCancelled(true); return; }
+            if (slot < SIZE && !s.unlocked.contains(slot)) { event.setCancelled(true); return; }
         }
         if (event.getWhoClicked() instanceof Player player) {
             Bukkit.getScheduler().runTask(plugin, () -> { bounceScps(s, player); retally(player); });
@@ -164,12 +190,12 @@ public final class StashManager implements Listener {
         if (event.getPlayer() instanceof Player p) retally(p);
     }
 
-    /** Any SCP item sitting in a usable slot is bounced back to the player. */
+    /** Any SCP item in an unlocked tile is bounced back to the player. */
     private void bounceScps(Stash s, Player player) {
-        for (int i = 0; i < s.unlocked; i++) {
-            ItemStack it = s.inv.getItem(i);
+        for (int slot : s.unlocked) {
+            ItemStack it = s.inv.getItem(slot);
             if (isScp(it)) {
-                s.inv.setItem(i, null);
+                s.inv.setItem(slot, null);
                 player.getInventory().addItem(it).values()
                     .forEach(left -> player.getWorld().dropItemNaturally(player.getLocation(), left));
                 player.sendActionBar(Component.text("SCP items can't be stashed.", NamedTextColor.RED));
@@ -188,22 +214,21 @@ public final class StashManager implements Listener {
     }
     private void save(Stash s) {
         YamlConfiguration cfg = new YamlConfiguration();
-        cfg.set("unlocked", s.unlocked);
-        for (int i = 0; i < s.unlocked; i++) {
-            ItemStack it = s.inv.getItem(i);
-            if (it != null && !isScp(it)) cfg.set("slot." + i, it);
+        cfg.set("unlocked", new java.util.ArrayList<>(s.unlocked));
+        for (int slot : s.unlocked) {
+            ItemStack it = s.inv.getItem(slot);
+            if (it != null && !isScp(it)) cfg.set("slot." + slot, it);
         }
         try { cfg.save(file(s.owner, s.stashId)); }
-        catch (IOException e) { plugin.getLogger().warning("Could not save stash " + s.stashId + " for " + s.owner); }
+        catch (IOException e) { plugin.getLogger().warning("Could not save stash " + s.stashId); }
     }
-    private void saveMeta(Stash s) {   // persist the unlocked count immediately after a purchase
+    private void saveMeta(Stash s) {   // persist the unlocked set right after a purchase
         YamlConfiguration cfg = load(s.owner, s.stashId);
-        cfg.set("unlocked", s.unlocked);
+        cfg.set("unlocked", new java.util.ArrayList<>(s.unlocked));
         try { cfg.save(file(s.owner, s.stashId)); } catch (IOException ignored) { }
     }
 
-    /** Recompute a player's total STASH CREDITS = value of credit cash across ALL their
-     *  stashes, and publish it to the credits_stash scoreboard (the HUD reads it). */
+    /** Total STASH CREDITS = credit cash across ALL the player's stashes -> the HUD. */
     public void retally(Player player) {
         File pdir = new File(dir, player.getUniqueId().toString());
         int total = 0;
@@ -218,7 +243,7 @@ public final class StashManager implements Listener {
                 }
             }
         }
-        setScore("credits_stash", player.getName(), total);   // shared with Labra's HUD
+        setScore("credits_stash", player.getName(), total);
     }
 
     // ------------------------------------------------------------- placed stash
@@ -226,7 +251,7 @@ public final class StashManager implements Listener {
         var ray = player.rayTraceBlocks(6.0);
         if (ray == null || ray.getHitBlock() == null || ray.getHitBlockFace() == null) return false;
         Location at = ray.getHitBlock().getRelative(ray.getHitBlockFace()).getLocation().add(0.5, 0.0, 0.5);
-        String stashId = UUID.randomUUID().toString();   // this physical stash's own id
+        String stashId = UUID.randomUUID().toString();
         BlockDisplay model = at.getWorld().spawn(at.clone().add(0, 0.05, 0), BlockDisplay.class, d -> {
             d.setBlock(Material.SPAWNER.createBlockData());
             d.addScoreboardTag(TAG_STASH);
@@ -240,22 +265,36 @@ public final class StashManager implements Listener {
             i.setInteractionWidth(1.0f);
             i.setInteractionHeight(1.0f);
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
-            // remember the model so orphan sweeps can pair them
-            i.getPersistentDataContainer().set(new NamespacedKey(plugin, "stash_model"),
-                PersistentDataType.STRING, model.getUniqueId().toString());
+            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, model.getUniqueId().toString());
         });
+        return true;
+    }
+
+    /** Remove the stash the player is looking at (both the box + the model). */
+    private boolean removeAt(Entity hit) {
+        if (hit == null || !hit.getScoreboardTags().contains(TAG_STASH)) return false;
+        Location at = hit.getLocation();
+        for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
+            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();
+        }
         return true;
     }
 
     public boolean removeLooked(Player player) {
         var ray = player.rayTraceEntities(6);
-        if (ray == null || ray.getHitEntity() == null
-            || !ray.getHitEntity().getScoreboardTags().contains(TAG_STASH)) return false;
-        Location at = ray.getHitEntity().getLocation();
-        for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
-            if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();
-        }
-        return true;
+        return ray != null && removeAt(ray.getHitEntity());
+    }
+
+    /** Op PUNCH (left-click) on a stash removes it. */
+    @EventHandler
+    public void onPunch(PlayerInteractEvent event) {
+        if (event.getAction() != Action.LEFT_CLICK_AIR && event.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        Player p = event.getPlayer();
+        if (!p.hasPermission("facility.admin")) return;
+        var ray = p.rayTraceEntities(6);
+        if (ray == null || !removeAt(ray.getHitEntity())) return;
+        p.sendActionBar(Component.text("Stash removed.", NamedTextColor.GRAY));
+        p.playSound(p.getLocation(), Sound.BLOCK_STONE_BREAK, 0.8f, 0.9f);
     }
 
     @EventHandler
@@ -265,16 +304,13 @@ public final class StashManager implements Listener {
         if (!box.getScoreboardTags().contains(TAG_STASH)) return;
         event.setCancelled(true);
         String stashId = box.getPersistentDataContainer().get(stashIdKey, PersistentDataType.STRING);
-        if (stashId == null) stashId = PERSONAL;
-        open(event.getPlayer(), stashId);
+        open(event.getPlayer(), stashId == null ? PERSONAL : stashId);
         event.getPlayer().playSound(event.getPlayer().getLocation(), Sound.BLOCK_ENDER_CHEST_OPEN, 0.7f, 1.1f);
     }
 
-    /** Open the player's command stash (a single personal one, id "personal"). */
     public void openPersonal(Player player) { open(player, PERSONAL); }
 
     public void sweepOrphans() {
-        NamespacedKey modelKey = new NamespacedKey(plugin, "stash_model");
         for (var world : Bukkit.getWorlds()) {
             for (Interaction box : world.getEntitiesByClass(Interaction.class)) {
                 if (!box.getScoreboardTags().contains(TAG_STASH)) continue;
@@ -285,7 +321,6 @@ public final class StashManager implements Listener {
     }
 
     // ------------------------------------------------------------- item checks
-    /** The credit value of one of this item (cash), or 0. Matches Labra's credit items. */
     public static int creditValue(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return 0;
         var s = item.getItemMeta().getCustomModelDataComponent().getStrings();
@@ -295,8 +330,6 @@ public final class StashManager implements Listener {
         return 0;
     }
 
-    /** Heuristic: an SCP item (blocked from stashes). Matches a custom_model_data or a
-     *  display name that mentions an SCP. */
     public static boolean isScp(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return false;
         ItemMeta meta = item.getItemMeta();
@@ -328,7 +361,6 @@ public final class StashManager implements Listener {
     }
     private String sanitize(String id) { return id.replaceAll("[^A-Za-z0-9_-]", "_"); }
 
-    // credit scoreboards (shared with Labra's Credits: "credits" / "credits_stash")
     public int balance(Player p) { return score("credits", p.getName()); }
     private boolean takeCredits(Player p, int amount) {
         int b = balance(p);

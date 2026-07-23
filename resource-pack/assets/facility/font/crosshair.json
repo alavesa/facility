@@ -1,0 +1,13 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "facility:font/crosshair_hl.png",
+      "ascent": 92,
+      "height": 100,
+      "chars": [
+        ""
+      ]
+    }
+  ]
+}

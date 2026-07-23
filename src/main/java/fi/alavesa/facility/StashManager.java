@@ -252,25 +252,21 @@ public final class StashManager implements Listener {
     public boolean place(Player player) {
         var ray = player.rayTraceBlocks(6.0);
         if (ray == null || ray.getHitBlock() == null || ray.getHitBlockFace() == null) return false;
-        Location at = ray.getHitBlock().getRelative(ray.getHitBlockFace()).getLocation().add(0.5, 0.0, 0.5);
+        org.bukkit.block.Block spot = ray.getHitBlock().getRelative(ray.getHitBlockFace());
+        if (!spot.getType().isAir() && !spot.isReplaceable()) return false;   // don't clobber a real block
+
+        // A REAL, EMPTY spawner block: it shows the recognisable iron cage, but because it
+        // has no spawn data it neither SPINS a mob nor ever spawns one. (A BlockDisplay of a
+        // spawner draws no visible cage on the client, which is why it looked unplaced.) The
+        // skeleton "inside" is a separate STILL skull display, so nothing ever rotates.
+        spot.setType(Material.SPAWNER);
+        Location at = spot.getLocation().add(0.5, 0.0, 0.5);
         String stashId = UUID.randomUUID().toString();
 
-        // The cage: a spawner BlockDisplay. A BlockDisplay never animates the mob inside, so
-        // it stays STILL (no spinning), and we light it fully so the cage is clearly visible.
-        BlockDisplay cage = at.getWorld().spawn(at.clone().add(0, 0.05, 0), BlockDisplay.class, d -> {
-            d.setBlock(Material.SPAWNER.createBlockData());
-            d.addScoreboardTag(TAG_STASH);
-            float sc = 0.9f;
-            d.setTransformation(new org.bukkit.util.Transformation(
-                new org.joml.Vector3f(-sc / 2f, 0f, -sc / 2f), new org.joml.Quaternionf(),
-                new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
-            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
-        });
-        // A STILL skeleton skull floating in the cage - the "mob inside", never spinning.
-        at.getWorld().spawn(at.clone().add(0, 0.32, 0), org.bukkit.entity.ItemDisplay.class, d -> {
+        at.getWorld().spawn(at.clone().add(0, 0.30, 0), org.bukkit.entity.ItemDisplay.class, d -> {
             d.setItemStack(new ItemStack(Material.SKELETON_SKULL));
             d.addScoreboardTag(TAG_STASH);
-            float sc = 0.55f;
+            float sc = 0.5f;
             d.setTransformation(new org.bukkit.util.Transformation(
                 new org.joml.Vector3f(0, 0, 0), new org.joml.Quaternionf(),
                 new org.joml.Vector3f(sc, sc, sc), new org.joml.Quaternionf()));
@@ -282,14 +278,29 @@ public final class StashManager implements Listener {
             i.setInteractionHeight(1.2f);
             i.setResponsive(true);          // so a left-click registers as an attack (op punch-remove)
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
-            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, cage.getUniqueId().toString());
+            i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, blockKey(spot));
         });
         return true;
     }
 
-    /** Remove the stash the player is looking at (box + cage + skull). */
+    private String blockKey(org.bukkit.block.Block b) {
+        return b.getWorld().getName() + ":" + b.getX() + ":" + b.getY() + ":" + b.getZ();
+    }
+    private org.bukkit.block.Block blockFromKey(String key) {
+        try {
+            String[] p = key.split(":");
+            var w = Bukkit.getWorld(p[0]);
+            return w == null ? null : w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+        } catch (Exception e) { return null; }
+    }
+
+    /** Remove the stash the player is looking at (spawner block + skull + box). */
     private boolean removeAt(Entity hit) {
         if (hit == null || !hit.getScoreboardTags().contains(TAG_STASH)) return false;
+        if (hit instanceof Interaction box) {
+            org.bukkit.block.Block b = blockFromKey(box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING));
+            if (b != null && b.getType() == Material.SPAWNER) b.setType(Material.AIR);
+        }
         Location at = hit.getLocation();
         for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
             if (near.getScoreboardTags().contains(TAG_STASH)) near.remove();
@@ -334,12 +345,8 @@ public final class StashManager implements Listener {
         for (var world : Bukkit.getWorlds()) {
             for (Interaction box : world.getEntitiesByClass(Interaction.class)) {
                 if (!box.getScoreboardTags().contains(TAG_STASH)) continue;
-                String modelId = box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING);
-                Entity model = null;
-                try { if (modelId != null) model = Bukkit.getEntity(UUID.fromString(modelId)); }
-                catch (IllegalArgumentException ignored) { }
-                if (model == null) box.remove();   // its cage is gone -> clean up the orphan box
-
+                org.bukkit.block.Block b = blockFromKey(box.getPersistentDataContainer().get(modelKey, PersistentDataType.STRING));
+                if (b == null || b.getType() != Material.SPAWNER) box.remove();   // cage broken -> clean up orphan
             }
         }
     }

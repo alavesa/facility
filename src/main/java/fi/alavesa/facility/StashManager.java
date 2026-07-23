@@ -257,16 +257,19 @@ public final class StashManager implements Listener {
 
         // A REAL mob-spawner block, so the recognisable cage-with-a-spinning-skeleton model
         // shows (a BlockDisplay only draws the near-invisible empty cage). Spawning is fully
-        // disabled - it's decoration + storage, never a mob source.
+        // disabled - it's decoration + storage, never a mob source. Wrapped so that even if a
+        // spawner setter is picky on this MC build, the Interaction below STILL gets created
+        // (otherwise you'd get a spawner with no way to open it).
         spot.setType(Material.SPAWNER);
-        if (spot.getState() instanceof org.bukkit.block.CreatureSpawner cs) {
-            cs.setSpawnedType(org.bukkit.entity.EntityType.SKELETON);
-            cs.setSpawnCount(0);                 // never actually spawns a mob
-            cs.setMaxNearbyEntities(0);
-            cs.setRequiredPlayerRange(16);        // still shows the spinning skeleton up close
-            cs.setMinSpawnDelay(Integer.MAX_VALUE);
-            cs.setMaxSpawnDelay(Integer.MAX_VALUE);
-            cs.update(true, false);
+        try {
+            if (spot.getState() instanceof org.bukkit.block.CreatureSpawner cs) {
+                cs.setSpawnedType(org.bukkit.entity.EntityType.SKELETON);
+                cs.setSpawnCount(0);                 // never actually spawns a mob
+                cs.setRequiredPlayerRange(16);        // still shows the spinning skeleton up close
+                cs.update(true, false);
+            }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("Stash spawner config skipped: " + t.getMessage());
         }
 
         String stashId = UUID.randomUUID().toString();
@@ -274,7 +277,8 @@ public final class StashManager implements Listener {
         at.getWorld().spawn(at, Interaction.class, i -> {
             i.addScoreboardTag(TAG_STASH);
             i.setInteractionWidth(1.0f);
-            i.setInteractionHeight(1.0f);
+            i.setInteractionHeight(1.2f);
+            i.setResponsive(true);
             i.getPersistentDataContainer().set(stashIdKey, PersistentDataType.STRING, stashId);
             // store the spawner block's location, so removal/orphan-sweep can clear it
             i.getPersistentDataContainer().set(modelKey, PersistentDataType.STRING, blockKey(spot));

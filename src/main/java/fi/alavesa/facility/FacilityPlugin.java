@@ -71,6 +71,7 @@ public final class FacilityPlugin extends JavaPlugin {
         stashes = new StashManager(this);
         getServer().getPluginManager().registerEvents(stashes, this);
         getServer().getScheduler().runTaskTimer(this, stashes::sweepOrphans, 200L, 1200L);
+        getServer().getScheduler().runTaskTimer(this, lobby::menuFlagTick, 40L, 5L);   // keep credits-HUD yield flag matched to lobby state
         getServer().getScheduler().runTaskTimer(this, new InteractCrosshair(this), 40L, 2L);
         // The countdown bar ticks every 5 ticks (4 Hz) for smooth drain.
         getServer().getScheduler().runTaskTimer(this, combat, 20L, 5L);

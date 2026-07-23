@@ -278,6 +278,15 @@ public final class LobbyManager implements Listener {
         dialogMenu.openMain(player);
     }
 
+    /** Continuously reconcile facility.menu from the ACTUAL lobby state, every few ticks,
+     *  so a missed event hook can never leave the credits HUD drawing over the menu: a
+     *  player who has not Continued this session is, by definition, sitting in the menu. */
+    public void menuFlagTick() {
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            setMenuFlag(p, !continued.contains(p.getUniqueId()));
+        }
+    }
+
     /** Publish/clear facility.menu on the main scoreboard so Labra's credits HUD knows
      *  to stop drawing its title while the player sits in the menu overlay. */
     private void setMenuFlag(Player player, boolean on) {

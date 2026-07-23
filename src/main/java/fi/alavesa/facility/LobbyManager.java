@@ -272,7 +272,20 @@ public final class LobbyManager implements Listener {
      *  un-escapable ({@code can_close_with_escape:false}), so it is the lobby
      *  lock - no movement guard needed. */
     public void openMainMenu(Player player) {
+        setMenuFlag(player, true);   // tell the credits HUD to yield the title layer
         dialogMenu.openMain(player);
+    }
+
+    /** Publish/clear facility.menu on the main scoreboard so Labra's credits HUD knows
+     *  to stop drawing its title while the player sits in the menu overlay. */
+    private void setMenuFlag(Player player, boolean on) {
+        try {
+            var board = Bukkit.getScoreboardManager().getMainScoreboard();
+            var o = board.getObjective("facility.menu");
+            if (o == null) o = board.registerNewObjective("facility.menu",
+                org.bukkit.scoreboard.Criteria.DUMMY, Component.text("facility.menu"));
+            o.getScore(player.getName()).setScore(on ? 1 : 0);
+        } catch (Exception ignored) { }
     }
 
     /** The team selector's «Back button: go straight back to the main menu with
@@ -419,6 +432,7 @@ public final class LobbyManager implements Listener {
         cancelReentry(player, null);
         pendingMenu.remove(player.getUniqueId());
         stopMusic(player);
+        setMenuFlag(player, false);   // credits HUD can draw again once they deploy
         player.clearTitle();   // remove the menu-background subtitle before they deploy
         continued.add(player.getUniqueId());
         player.closeInventory();

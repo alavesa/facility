@@ -157,9 +157,12 @@ public final class StashManager implements Listener {
 
     private void buyTile(Stash s, Player player, int slot) {
         int cost = tileCost(s);
+        // pay from the balance; if it's short, cash in physical credit coins/bills from
+        // the inventory first (so a 10-credit bill can buy a tile), then pay.
+        if (balance(player) < cost) depositCreditItems(player);
         if (!takeCredits(player, cost)) {
-            player.sendActionBar(Component.text("Not enough credits (" + balance(player)
-                + "/" + cost + ").", NamedTextColor.RED));
+            player.sendActionBar(Component.text("Not enough credits (have " + balance(player)
+                + ", need " + cost + ").", NamedTextColor.RED));
             player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
             return;
         }
@@ -285,10 +288,12 @@ public final class StashManager implements Listener {
         return ray != null && removeAt(ray.getHitEntity());
     }
 
-    /** Op PUNCH (left-click) on a stash removes it. */
-    @EventHandler
-    public void onPunch(PlayerInteractEvent event) {
-        if (event.getAction() != Action.LEFT_CLICK_AIR && event.getAction() != Action.LEFT_CLICK_BLOCK) return;
+    /** Op PUNCH on a stash removes it. Uses the arm-swing animation (which fires
+     *  reliably when left-clicking an Interaction entity, unlike PlayerInteractEvent,
+     *  whose LEFT_CLICK_AIR the client withholds while an entity is under the cursor). */
+    @EventHandler(ignoreCancelled = false)
+    public void onPunch(org.bukkit.event.player.PlayerAnimationEvent event) {
+        if (event.getAnimationType() != org.bukkit.event.player.PlayerAnimationType.ARM_SWING) return;
         Player p = event.getPlayer();
         if (!p.hasPermission("facility.admin")) return;
         var ray = p.rayTraceEntities(6);
@@ -360,6 +365,22 @@ public final class StashManager implements Listener {
         return Component.text(text, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false);
     }
     private String sanitize(String id) { return id.replaceAll("[^A-Za-z0-9_-]", "_"); }
+
+    /** Cash in every physical credit coin/bill in the player's inventory, adding its
+     *  value to the credit balance and removing the item. Lets a player pay for a tile
+     *  straight from bills in their pack without a separate deposit step. */
+    private void depositCreditItems(Player p) {
+        int gained = 0;
+        ItemStack[] contents = p.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack it = contents[i];
+            int v = creditValue(it);
+            if (v <= 0) continue;
+            gained += v * it.getAmount();
+            p.getInventory().setItem(i, null);
+        }
+        if (gained > 0) setScore("credits", p.getName(), balance(p) + gained);
+    }
 
     public int balance(Player p) { return score("credits", p.getName()); }
     private boolean takeCredits(Player p, int amount) {

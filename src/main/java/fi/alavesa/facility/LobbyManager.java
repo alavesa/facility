@@ -99,6 +99,9 @@ public final class LobbyManager implements Listener {
             return;
         }
         plugin.getLogger().info("[Facility] join: " + player.getName() + " -> opening lobby menu.");
+        // Lock to spectator IMMEDIATELY so there's no delay where they see/fall through the
+        // world before the menu appears. The dialog itself opens on the very next tick.
+        try { player.setGameMode(GameMode.SPECTATOR); } catch (Exception ignored) { }
         beginMenu(player);
     }
 
@@ -120,9 +123,10 @@ public final class LobbyManager implements Listener {
         if (!player.isOnline() || continued.contains(id)) return;
         pendingMenu.add(id);
         startMusic(player);
-        scheduleShow(player, 20L, true);    // ~1s
-        scheduleShow(player, 45L, false);   // ~2.25s
-        scheduleShow(player, 80L, false);   // ~4s
+        scheduleShow(player, 1L, true);     // next tick - near-instant, no 1s delay
+        scheduleShow(player, 20L, false);   // backups for a client that wasn't ready / dropped packet
+        scheduleShow(player, 45L, false);
+        scheduleShow(player, 80L, false);
     }
 
     /** One menu-open attempt. Locks to spectator + shows the dialog; teleports to

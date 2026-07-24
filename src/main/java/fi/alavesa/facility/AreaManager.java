@@ -20,13 +20,16 @@ import java.util.UUID;
  * per-tick effects; the area a player stands in is also their "last area" (shown
  * in stats and the tab list) and a handy moderation/troubleshooting readout.
  *
- * Areas are stored as: name -> {world, x1,y1,z1, x2,y2,z2, effects[], scp008}.
- * effects are "TYPE:amplifier" (e.g. "SLOWNESS:1", "DARKNESS:0").
+ * Areas are stored as: name -> {world, x1,y1,z1, x2,y2,z2, effects[], scp008, sounds[]}.
+ * effects are "TYPE:amplifier" (e.g. "SLOWNESS:1", "DARKNESS:0"). sounds are ambience/
+ * commotion cues "key|volume|pitch|everySeconds" (pipe-delimited because a sound key like
+ * "lab:ambient.reactor" contains a colon); everySeconds 0 = play once on entering the area,
+ * >0 = re-play every N seconds while inside. Any resource-pack custom sound works.
  */
 public final class AreaManager {
 
     public record Area(String name, String world, int x1, int y1, int z1, int x2, int y2, int z2,
-                       List<String> effects, boolean scp008) {
+                       List<String> effects, boolean scp008, List<String> sounds) {
         boolean contains(Location l) {
             if (l.getWorld() == null || !l.getWorld().getName().equals(world)) return false;
             int x = l.getBlockX(), y = l.getBlockY(), z = l.getBlockZ();
@@ -56,7 +59,8 @@ public final class AreaManager {
                 cfg.getString(p + "world", "world"),
                 cfg.getInt(p + "x1"), cfg.getInt(p + "y1"), cfg.getInt(p + "z1"),
                 cfg.getInt(p + "x2"), cfg.getInt(p + "y2"), cfg.getInt(p + "z2"),
-                cfg.getStringList(p + "effects"), cfg.getBoolean(p + "scp008", false)));
+                cfg.getStringList(p + "effects"), cfg.getBoolean(p + "scp008", false),
+                cfg.getStringList(p + "sounds")));
         }
     }
 
@@ -120,6 +124,25 @@ public final class AreaManager {
     public void clearEffects(String name) {
         String key = name.toLowerCase(Locale.ROOT);
         cfg.set("areas." + key + ".effects", new ArrayList<String>());
+        save();
+        load();
+    }
+
+    /** Add a sound cue ("key|volume|pitch|everySeconds") to an area. Returns null on success. */
+    public String addSound(String name, String spec) {
+        String key = name.toLowerCase(Locale.ROOT);
+        if (!areas.containsKey(key)) return "No area named '" + name + "'.";
+        List<String> list = cfg.getStringList("areas." + key + ".sounds");
+        list.add(spec);
+        cfg.set("areas." + key + ".sounds", list);
+        save();
+        load();
+        return null;
+    }
+
+    public void clearSounds(String name) {
+        String key = name.toLowerCase(Locale.ROOT);
+        cfg.set("areas." + key + ".sounds", new ArrayList<String>());
         save();
         load();
     }

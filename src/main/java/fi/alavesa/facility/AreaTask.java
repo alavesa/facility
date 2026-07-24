@@ -31,16 +31,22 @@ public final class AreaTask implements Runnable {
         this.store = store;
     }
 
+    /** Seconds since enable - drives the "every N seconds" ambient sound cadence. */
+    private int seconds;
+
     @Override
     public void run() {
+        seconds++;
         Objective z008 = null;
         for (Player player : Bukkit.getOnlinePlayers()) {
             AreaManager.Area area = areas.areaAt(player.getLocation());
             String name = area == null ? null : area.name();
 
-            // last area (only write on change - it's persisted)
+            // last area (only write on change - it's persisted). Capture whether this is the
+            // tick they ENTERED the area (for one-shot "on enter" sound cues).
             String prev = store.lastArea(player.getUniqueId());
-            if (name != null && !name.equals(prev)) {
+            boolean entered = name != null && !name.equals(prev);
+            if (entered) {
                 store.setLastArea(player.getUniqueId(), name);
             }
 
@@ -56,6 +62,9 @@ public final class AreaTask implements Runnable {
                 PotionEffect eff = parse(spec);
                 if (eff != null) player.addPotionEffect(eff);
             }
+            for (String spec : area.sounds()) {
+                playAreaSound(player, spec, entered);
+            }
             if (area.scp008()) {
                 if (z008 == null) z008 = infectionObjective();
                 if (z008 != null) {
@@ -65,6 +74,23 @@ public final class AreaTask implements Runnable {
             }
         }
     }
+
+    /** Play an area sound cue "key|volume|pitch|everySeconds" to the player. Any resource-pack
+     *  sound event works (the key is passed through as a string). everySeconds 0 = only on the
+     *  tick they entered the area; >0 = re-play every N seconds while they stand inside. */
+    private void playAreaSound(Player player, String spec, boolean entered) {
+        String[] f = spec.split("\\|");
+        if (f.length == 0 || f[0].isBlank()) return;
+        String key = f[0].trim();
+        float vol = f.length > 1 ? parseF(f[1], 1f) : 1f;
+        float pitch = f.length > 2 ? parseF(f[2], 1f) : 1f;
+        int every = f.length > 3 ? parseInt(f[3], 0) : 0;
+        boolean play = every <= 0 ? entered : (seconds % every == 0);
+        if (play) player.playSound(player.getLocation(), key, org.bukkit.SoundCategory.AMBIENT, vol, pitch);
+    }
+
+    private float parseF(String s, float def) { try { return Float.parseFloat(s.trim()); } catch (Exception e) { return def; } }
+    private int parseInt(String s, int def) { try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; } }
 
     /** "TYPE:amplifier" -> a 1.5s effect (re-applied each second so it never lapses). */
     private PotionEffect parse(String spec) {

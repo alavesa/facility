@@ -548,7 +548,8 @@ public final class FacilityPlugin extends JavaPlugin {
                 if (all.isEmpty()) return ok(sender, "No areas defined yet.");
                 for (var a : all) {
                     sender.sendMessage(Component.text("• " + a.name() + "  [" + a.world() + "]  "
-                        + (a.scp008() ? "SCP-008 " : "") + a.effects(), NamedTextColor.GRAY));
+                        + (a.scp008() ? "SCP-008 " : "") + "fx" + a.effects()
+                        + (a.sounds().isEmpty() ? "" : "  sfx" + a.sounds()), NamedTextColor.GRAY));
                 }
                 return true;
             }
@@ -569,10 +570,31 @@ public final class FacilityPlugin extends JavaPlugin {
                 return areas.setScp008(args[2], on) ? ok(sender, "SCP-008 infection " + (on ? "on" : "off")
                     + " for '" + args[2] + "'.") : error(sender, "No area named '" + args[2] + "'.");
             }
+            case "sound" -> {
+                // /facility area sound <name> <soundkey> [volume] [pitch] [everySeconds]
+                // soundkey can be any vanilla or RESOURCE-PACK sound event (e.g. lab:ambient.reactor).
+                // everySeconds 0 (default) = play once on entering; N = re-play every N seconds inside.
+                if (args.length < 4) return error(sender,
+                    "/facility area sound <name> <soundkey> [volume] [pitch] [everySeconds]");
+                String vol = args.length > 4 ? args[4] : "1.0";
+                String pitch = args.length > 5 ? args[5] : "1.0";
+                String every = args.length > 6 ? args[6] : "0";
+                String spec = args[3] + "|" + vol + "|" + pitch + "|" + every;
+                String problem = areas.addSound(args[2], spec);
+                if (problem != null) return error(sender, problem);
+                return ok(sender, "Added sound " + args[3] + " to '" + args[2] + "' — "
+                    + ("0".equals(every) ? "plays on enter" : "every " + every + "s while inside") + ".");
+            }
+            case "clearsounds" -> {
+                if (args.length < 3) return error(sender, "/facility area clearsounds <name>");
+                areas.clearSounds(args[2]);
+                return ok(sender, "Cleared sounds on '" + args[2] + "'.");
+            }
             default -> {
                 sender.sendMessage(Component.text(
                     "/facility area pos1|pos2 | create <name> | remove <name> | list | "
-                    + "effect <name> <EFFECT:amp> | cleareffects <name> | scp008 <name> <on|off>",
+                    + "effect <name> <EFFECT:amp> | cleareffects <name> | scp008 <name> <on|off> | "
+                    + "sound <name> <soundkey> [vol] [pitch] [everySeconds] | clearsounds <name>",
                     NamedTextColor.AQUA));
                 return true;
             }
@@ -607,7 +629,7 @@ public final class FacilityPlugin extends JavaPlugin {
                     "move", "setlabel", "setaction"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
                 case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "list",
-                    "effect", "cleareffects", "scp008"), args[1]) : List.of();
+                    "effect", "cleareffects", "scp008", "sound", "clearsounds"), args[1]) : List.of();
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {

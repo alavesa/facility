@@ -44,6 +44,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private DailyRewardStore dailyRewards;
     private DailyRewardMenu dailyRewardMenu;
     private SNavManager snav;
+    private SNavMap snavMap;
 
     private NamespacedKey teamKey;
 
@@ -76,9 +77,11 @@ public final class FacilityPlugin extends JavaPlugin {
         dailyRewards = new DailyRewardStore(this);
         dailyRewardMenu = new DailyRewardMenu(this, dailyRewards, stashes);
         getServer().getPluginManager().registerEvents(dailyRewardMenu, this);
-        snav = new SNavManager(this, areas);
+        snavMap = new SNavMap(this);
+        snav = new SNavManager(this, areas, snavMap);
         getServer().getPluginManager().registerEvents(snav, this);
         getServer().getScheduler().runTaskTimer(this, snav::tick, 40L, 2L);
+        getServer().getScheduler().runTaskTimer(this, snavMap::saveIfDirty, 2400L, 2400L);
         getServer().getScheduler().runTaskTimer(this, stashes::sweepOrphans, 200L, 1200L);
         getServer().getScheduler().runTaskTimer(this, lobby::menuFlagTick, 40L, 5L);   // keep credits-HUD yield flag matched to lobby state
         getServer().getScheduler().runTaskTimer(this, new InteractCrosshair(this), 40L, 2L);
@@ -102,6 +105,7 @@ public final class FacilityPlugin extends JavaPlugin {
         if (blackout != null && blackout.isActive()) blackout.end();   // restore lights
         if (combat != null) combat.shutdown();
         if (snav != null) snav.closeAll();   // despawn floating map holograms
+        if (snavMap != null) snavMap.saveIfDirty();
         // TextDisplay holograms are entities and despawn/expire on their own;
         // nothing persistent to clean beyond the boss bars above.
         getLogger().info("SITE-19 FACILITY // offline");
@@ -221,6 +225,34 @@ public final class FacilityPlugin extends JavaPlugin {
                     target.getWorld().dropItemNaturally(target.getLocation(), left));
                 sender.sendMessage(Component.text("S-Nav Navigator given to " + target.getName()
                     + " - right-click it to project the site map.", NamedTextColor.AQUA));
+                return true;
+            }
+            case "snavbattery" -> {
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                Player target = args.length >= 2 ? Bukkit.getPlayerExact(args[1])
+                    : (sender instanceof Player p ? p : null);
+                if (target == null) return error(sender, "Player not found.");
+                int n = 1;
+                if (args.length >= 3) { try { n = Math.max(1, Integer.parseInt(args[2])); } catch (Exception ignored) { } }
+                for (int i = 0; i < n; i++) target.getInventory().addItem(snav.buildBattery()).values()
+                    .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                sender.sendMessage(Component.text(n + " S-Nav Battery given to " + target.getName() + ".",
+                    NamedTextColor.AQUA));
+                return true;
+            }
+            case "snavplane" -> {
+                // Set the fixed scan plane. No arg = the op's current Y (stand on the floor to map).
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                int y;
+                if (args.length >= 2) {
+                    try { y = Integer.parseInt(args[1]); }
+                    catch (NumberFormatException e) { return error(sender, "/facility snavplane [y]"); }
+                } else if (sender instanceof Player p) {
+                    y = p.getLocation().getBlockY() + 1;   // the wall slice just above the floor you stand on
+                } else return error(sender, "/facility snavplane <y>");
+                snav.setScanY(y);
+                sender.sendMessage(Component.text("S-Nav now scans the plane at Y=" + y
+                    + ". Re-open the map to re-scan.", NamedTextColor.AQUA));
                 return true;
             }
             case "area" -> {
@@ -697,7 +729,8 @@ public final class FacilityPlugin extends JavaPlugin {
         return switch (args.length) {
             case 1 -> {
                 List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "daily"));
-                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area", "dailyreward", "snav"));
+                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area",
+                    "dailyreward", "snav", "snavbattery", "snavplane"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {

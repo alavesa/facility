@@ -36,12 +36,29 @@ public final class DailyRewardStore {
 
     public void setDays(int n) { yaml.set("days", Math.max(1, Math.min(54, n))); save(); }
 
-    /** The item reward for a day (1-based), or null if that day pays currency / nothing. */
-    public ItemStack itemReward(int day) { return yaml.getItemStack("rewards." + day + ".item"); }
+    /** The item reward for a day (1-based), or null if that day pays currency / nothing.
+     *  Stored as Base64 of ItemStack.serializeAsBytes() - the component-complete Paper serializer -
+     *  so guns and other items with modern components survive (Bukkit's YAML ItemStack path drops
+     *  those components, which is why guns were vanishing). Legacy ".item" entries still load. */
+    public ItemStack itemReward(int day) {
+        String b64 = yaml.getString("rewards." + day + ".item64");
+        if (b64 != null) {
+            try { return ItemStack.deserializeBytes(java.util.Base64.getDecoder().decode(b64)); }
+            catch (Exception e) { return null; }
+        }
+        return yaml.getItemStack("rewards." + day + ".item");   // legacy fallback
+    }
 
     public void setItemReward(int day, ItemStack item) {
-        yaml.set("rewards." + day + ".item", item);
-        if (item != null) yaml.set("rewards." + day + ".currency", null); // one kind per day
+        if (item == null || item.getType().isAir()) {
+            yaml.set("rewards." + day + ".item64", null);
+            yaml.set("rewards." + day + ".item", null);
+        } else {
+            yaml.set("rewards." + day + ".item64",
+                java.util.Base64.getEncoder().encodeToString(item.serializeAsBytes()));
+            yaml.set("rewards." + day + ".item", null);       // drop any legacy copy
+            yaml.set("rewards." + day + ".currency", null);   // one kind per day
+        }
         save();
     }
 
@@ -50,7 +67,10 @@ public final class DailyRewardStore {
 
     public void setCurrency(int day, int amount) {
         yaml.set("rewards." + day + ".currency", Math.max(0, amount));
-        if (amount > 0) yaml.set("rewards." + day + ".item", null);
+        if (amount > 0) {
+            yaml.set("rewards." + day + ".item", null);
+            yaml.set("rewards." + day + ".item64", null);
+        }
         save();
     }
 

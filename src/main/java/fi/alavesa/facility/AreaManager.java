@@ -55,7 +55,10 @@ public final class AreaManager {
         if (sec == null) return;
         for (String name : sec.getKeys(false)) {
             String p = "areas." + name + ".";
-            areas.put(name.toLowerCase(Locale.ROOT), new Area(name,
+            // The section key is lowercased (for case-insensitive lookups); the DISPLAY name
+            // keeps the operator's original capitals. Old areas without a stored display-name
+            // fall back to the key.
+            areas.put(name.toLowerCase(Locale.ROOT), new Area(cfg.getString(p + "display-name", name),
                 cfg.getString(p + "world", "world"),
                 cfg.getInt(p + "x1"), cfg.getInt(p + "y1"), cfg.getInt(p + "z1"),
                 cfg.getInt(p + "x2"), cfg.getInt(p + "y2"), cfg.getInt(p + "z2"),
@@ -89,6 +92,7 @@ public final class AreaManager {
         if (a == null || b == null) return "Set both pos1 and pos2 first.";
         String key = name.toLowerCase(Locale.ROOT);
         String base = "areas." + key + ".";
+        cfg.set(base + "display-name", name);   // keep the operator's capitals for the tab readout
         cfg.set(base + "world", p.getWorld().getName());
         cfg.set(base + "x1", Math.min(a[0], b[0])); cfg.set(base + "x2", Math.max(a[0], b[0]));
         cfg.set(base + "y1", Math.min(a[1], b[1])); cfg.set(base + "y2", Math.max(a[1], b[1]));

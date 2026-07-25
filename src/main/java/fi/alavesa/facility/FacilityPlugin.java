@@ -190,11 +190,22 @@ public final class FacilityPlugin extends JavaPlugin {
                 return true;
             }
             case "daily" -> {
-                // Main-menu "Daily Rewards" button: open the claim screen (item icons).
+                // Main-menu "Daily Rewards" button: open the claim DIALOG (Back on top + a day per button).
                 if (!(sender instanceof Player player)) return error(sender, "Players only.");
                 if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
                 lobby.menuInteracted(player);   // stop join re-sends from clobbering this
-                dailyRewardMenu.openClaim(player);
+                dialogMenu.openDaily(player, dailyRewards);
+                return true;
+            }
+            case "dailyclaim" -> {
+                // A day button in the daily-rewards dialog: try to claim it, then reopen the dialog.
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                int day;
+                try { day = Integer.parseInt(args[1]); }
+                catch (Exception e) { return error(sender, "Pick a day from the menu."); }
+                dailyRewardMenu.claim(player, day);
+                dialogMenu.openDaily(player, dailyRewards);
                 return true;
             }
             case "dailyreward" -> {

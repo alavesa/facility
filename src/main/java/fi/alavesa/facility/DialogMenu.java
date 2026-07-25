@@ -80,6 +80,37 @@ public final class DialogMenu {
         show(player, statsDialog(player));
     }
 
+    /** The DAILY REWARDS dialog: a big Back button on top, then one button per day (the reward
+     *  buttons). Today's claimable day reads "▸ CLAIM"; clicking a day runs facility dailyclaim. */
+    public void openDaily(Player player, DailyRewardStore rewards) {
+        int claimable = rewards.claimableDay(player.getUniqueId());
+        int streak = rewards.streak(player.getUniqueId());
+        StringBuilder actions = new StringBuilder();
+        // big return button, first / on top
+        actions.append(button(Component.text("« Back to Menu", NamedTextColor.GOLD, TextDecoration.BOLD),
+            "facility back"));
+        for (int day = 1; day <= rewards.days(); day++) {
+            String reward = rewards.rewardLabel(day);
+            Component label;
+            String status;
+            NamedTextColor color;
+            if (day == claimable) { status = " ▸ CLAIM"; color = NamedTextColor.GREEN; }
+            else if (claimable == 0 && day == streak) { status = " ✔ claimed today"; color = NamedTextColor.DARK_GREEN; }
+            else if (day < claimable) { status = " ✔"; color = NamedTextColor.DARK_GREEN; }
+            else { status = " · locked"; color = NamedTextColor.DARK_GRAY; }
+            label = Component.text("Day " + day + ": ", color)
+                .append(Component.text(reward, NamedTextColor.WHITE))
+                .append(Component.text(status, color));
+            actions.append(",").append(button(label, "facility dailyclaim " + day));
+        }
+        String bodyText = claimable == 0
+            ? "You've claimed today's reward — come back tomorrow."
+            : "Claim day " + claimable + " to keep your streak going.";
+        String body = "{type:\"minecraft:plain_message\",contents:"
+            + json(Component.text(bodyText, NamedTextColor.GRAY)) + "}";
+        show(player, dialog("DAILY REWARDS", body, actions.toString()));
+    }
+
     /** Let the player pick which of their team's spawns to deploy at. Each button
      *  runs {@code facility spawn <index>}; a «Back returns to the main menu. */
     public void openSpawnChoice(Player player, java.util.List<TeamManager.SpawnPoint> spawns) {

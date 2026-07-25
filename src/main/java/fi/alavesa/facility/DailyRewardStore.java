@@ -56,6 +56,18 @@ public final class DailyRewardStore {
 
     public boolean hasReward(int day) { return itemReward(day) != null || currencyReward(day) > 0; }
 
+    /** A short human label for a day's reward, for the claim dialog buttons. */
+    public String rewardLabel(int day) {
+        ItemStack item = itemReward(day);
+        if (item != null) {
+            String name = item.getType().name().toLowerCase().replace('_', ' ');
+            return item.getAmount() + "x " + name;
+        }
+        int cur = currencyReward(day);
+        if (cur > 0) return cur + " Credits";
+        return "(not set)";
+    }
+
     // --- per-player claim state --------------------------------------------
 
     public long lastClaim(UUID id) { return yaml.getLong("players." + id + ".last", -1); }

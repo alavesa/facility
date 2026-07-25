@@ -44,7 +44,6 @@ public final class FacilityPlugin extends JavaPlugin {
     private DailyRewardStore dailyRewards;
     private DailyRewardMenu dailyRewardMenu;
     private SNavManager snav;
-    private SNavMap snavMap;
 
     private NamespacedKey teamKey;
 
@@ -77,11 +76,10 @@ public final class FacilityPlugin extends JavaPlugin {
         dailyRewards = new DailyRewardStore(this);
         dailyRewardMenu = new DailyRewardMenu(this, dailyRewards, stashes);
         getServer().getPluginManager().registerEvents(dailyRewardMenu, this);
-        snavMap = new SNavMap(this);
-        snav = new SNavManager(this, areas, snavMap);
+        snav = new SNavManager(this);
+        snav.init();
         getServer().getPluginManager().registerEvents(snav, this);
         getServer().getScheduler().runTaskTimer(this, snav::tick, 40L, 2L);
-        getServer().getScheduler().runTaskTimer(this, snavMap::saveIfDirty, 2400L, 2400L);
         getServer().getScheduler().runTaskTimer(this, stashes::sweepOrphans, 200L, 1200L);
         getServer().getScheduler().runTaskTimer(this, lobby::menuFlagTick, 40L, 5L);   // keep credits-HUD yield flag matched to lobby state
         getServer().getScheduler().runTaskTimer(this, new InteractCrosshair(this), 40L, 2L);
@@ -104,8 +102,6 @@ public final class FacilityPlugin extends JavaPlugin {
     public void onDisable() {
         if (blackout != null && blackout.isActive()) blackout.end();   // restore lights
         if (combat != null) combat.shutdown();
-        if (snav != null) snav.closeAll();   // despawn floating map holograms
-        if (snavMap != null) snavMap.saveIfDirty();
         // TextDisplay holograms are entities and despawn/expire on their own;
         // nothing persistent to clean beyond the boss bars above.
         getLogger().info("SITE-19 FACILITY // offline");

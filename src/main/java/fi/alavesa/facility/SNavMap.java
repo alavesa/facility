@@ -63,13 +63,20 @@ public final class SNavMap {
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 if (bucket.size() >= MAX_PER_BUCKET) break;
-                Block b = w.getBlockAt(px + dx, planeY, pz + dz);
-                if (!b.getType().isOccluding()) continue;
+                if (!isWall(w, px + dx, planeY, pz + dz)) continue;
                 if (bucket.add(pack(px + dx, pz + dz))) added++;
             }
         }
         if (added > 0) dirty = true;
         return added;
+    }
+
+    /** A column is a wall if it's solid at the plane OR one block above it. Uses isSolid() (not the
+     *  stricter isOccluding), so glass, stairs, slabs, walls and fences all count - which is what
+     *  was making thin/partial walls go undetected. */
+    private boolean isWall(World w, int x, int y, int z) {
+        return w.getBlockAt(x, y, z).getType().isSolid()
+            || w.getBlockAt(x, y + 1, z).getType().isSolid();
     }
 
     /** Forget the scanned slice for a given plane. */

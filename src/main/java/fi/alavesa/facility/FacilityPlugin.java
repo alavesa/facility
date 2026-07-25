@@ -227,19 +227,6 @@ public final class FacilityPlugin extends JavaPlugin {
                     + " - right-click it to project the site map.", NamedTextColor.AQUA));
                 return true;
             }
-            case "snavbattery" -> {
-                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
-                Player target = args.length >= 2 ? Bukkit.getPlayerExact(args[1])
-                    : (sender instanceof Player p ? p : null);
-                if (target == null) return error(sender, "Player not found.");
-                int n = 1;
-                if (args.length >= 3) { try { n = Math.max(1, Integer.parseInt(args[2])); } catch (Exception ignored) { } }
-                for (int i = 0; i < n; i++) target.getInventory().addItem(snav.buildBattery()).values()
-                    .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
-                sender.sendMessage(Component.text(n + " S-Nav Battery given to " + target.getName() + ".",
-                    NamedTextColor.AQUA));
-                return true;
-            }
             case "snavplane" -> {
                 // Set the fixed scan plane. No arg = the op's current Y (stand on the floor to map).
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
@@ -730,7 +717,7 @@ public final class FacilityPlugin extends JavaPlugin {
             case 1 -> {
                 List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "daily"));
                 if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area",
-                    "dailyreward", "snav", "snavbattery", "snavplane"));
+                    "dailyreward", "snav", "snavplane"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {

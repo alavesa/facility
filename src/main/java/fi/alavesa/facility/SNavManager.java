@@ -44,11 +44,8 @@ import java.util.UUID;
  */
 public final class SNavManager implements Listener {
 
-    private static final float PANEL = 1.3f;     // panel side in blocks
-    private static final double DIST = 1.5;      // how far ahead of the eyes it floats
-    private static final int VIEW = 32;          // how many blocks each way the map shows
-    private static final int SCAN = 14;          // radius scanned into the map per pass
-    private static final int MAX_SEGMENTS = 240; // safety cap on line entities
+    private static final double DIST = 1.9;      // how far ahead of the eyes it floats
+    private static final int MAX_SEGMENTS = 260; // safety cap on line entities
     private static final int REBUILD_TICKS = 10; // rescan + redraw this often (task runs /2 ticks)
 
     private final FacilityPlugin plugin;
@@ -56,7 +53,6 @@ public final class SNavManager implements Listener {
     private final SNavMap map;
     private final NamespacedKey snavKey;
     private final NamespacedKey batteryKey;      // charge left, on the S-Nav item
-    private final NamespacedKey batteryItemKey;  // marks a spare battery item
     private final Map<UUID, Nav> open = new HashMap<>();
 
     public SNavManager(FacilityPlugin plugin, AreaManager areas, SNavMap map) {
@@ -65,7 +61,6 @@ public final class SNavManager implements Listener {
         this.map = map;
         this.snavKey = new NamespacedKey(plugin, "snav");
         this.batteryKey = new NamespacedKey(plugin, "snav_battery");
-        this.batteryItemKey = new NamespacedKey(plugin, "snav_battery_item");
     }
 
     private int batteryMax() { return Math.max(1, plugin.getConfig().getInt("snav.battery-max", 100)); }
@@ -73,6 +68,10 @@ public final class SNavManager implements Listener {
     /** The single fixed Y plane the S-Nav scans/draws (a floor-plan slice, not the holder's height). */
     public int scanY() { return plugin.getConfig().getInt("snav.scan-y", 64); }
     public void setScanY(int y) { plugin.getConfig().set("snav.scan-y", y); plugin.saveConfig(); }
+    /** Map display side (blocks) and how far each way it shows - both operator-tunable. */
+    private float panelSize() { return (float) plugin.getConfig().getDouble("snav.panel-size", 2.4); }
+    private int viewRadius() { return Math.max(8, Math.min(64, plugin.getConfig().getInt("snav.view-radius", 40))); }
+    private int scanRadius() { return Math.max(4, Math.min(48, plugin.getConfig().getInt("snav.scan-radius", 16))); }
 
     private record Part(Display display, float u, float v, float push) { }
 
@@ -94,7 +93,7 @@ public final class SNavManager implements Listener {
         meta.lore(List.of(
             Component.text("Right-click: project the site map", NamedTextColor.DARK_GRAY)
                 .decoration(TextDecoration.ITALIC, false),
-            Component.text("Sneak + right-click: load a battery", NamedTextColor.DARK_GRAY)
+            Component.text("Sneak + right-click: load a 9V battery", NamedTextColor.DARK_GRAY)
                 .decoration(TextDecoration.ITALIC, false)));
         meta.getPersistentDataContainer().set(snavKey, PersistentDataType.BYTE, (byte) 1);
         meta.getPersistentDataContainer().set(batteryKey, PersistentDataType.INTEGER, batteryMax());
@@ -105,29 +104,16 @@ public final class SNavManager implements Listener {
         return item;
     }
 
-    public ItemStack buildBattery() {
-        ItemStack item = new ItemStack(Material.REDSTONE);
-        ItemMeta meta = item.getItemMeta();
-        meta.itemName(Component.text("S-Nav Battery", NamedTextColor.AQUA)
-            .decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(Component.text("Sneak + right-click your S-Nav to load", NamedTextColor.DARK_GRAY)
-            .decoration(TextDecoration.ITALIC, false)));
-        meta.getPersistentDataContainer().set(batteryItemKey, PersistentDataType.BYTE, (byte) 1);
-        var cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of("snav_battery"));
-        meta.setCustomModelDataComponent(cmd);
-        item.setItemMeta(meta);
-        return item;
-    }
-
     public boolean isSnav(ItemStack item) {
         return item != null && item.hasItemMeta()
             && item.getItemMeta().getPersistentDataContainer().has(snavKey, PersistentDataType.BYTE);
     }
 
+    /** The S-Nav runs on the SAME 9V battery as the Lab plugin's NVGs: any item whose
+     *  custom_model_data carries "lab_battery" (what Labra's NvgListener checks for). */
     private boolean isBattery(ItemStack item) {
         return item != null && item.hasItemMeta()
-            && item.getItemMeta().getPersistentDataContainer().has(batteryItemKey, PersistentDataType.BYTE);
+            && item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_battery");
     }
 
     private int battery(ItemStack snav) {
@@ -165,12 +151,12 @@ public final class SNavManager implements Listener {
             return;
         }
         if (!consumeBattery(p)) {
-            Msg.actionbar(p, Component.text("No S-Nav batteries in your inventory.", NamedTextColor.RED));
+            Msg.actionbar(p, Component.text("No 9V batteries in your inventory.", NamedTextColor.RED));
             return;
         }
         setBattery(p, snav, batteryMax());
         p.playSound(p.getLocation(), org.bukkit.Sound.BLOCK_BEACON_POWER_SELECT, 0.6f, 1.6f);
-        Msg.actionbar(p, Component.text("S-Nav battery loaded — 100%.", NamedTextColor.GREEN));
+        Msg.actionbar(p, Component.text("9V battery loaded — S-Nav at 100%.", NamedTextColor.GREEN));
     }
 
     private boolean consumeBattery(Player p) {
@@ -192,7 +178,7 @@ public final class SNavManager implements Listener {
     public void toggle(Player player, ItemStack held) {
         if (open.containsKey(player.getUniqueId())) { close(player.getUniqueId()); return; }
         if (battery(held) <= 0) {
-            Msg.actionbar(player, Component.text("S-Nav battery is dead — sneak + right-click to load one.",
+            Msg.actionbar(player, Component.text("S-Nav battery is dead — sneak + right-click with a 9V battery.",
                 NamedTextColor.RED));
             return;
         }
@@ -202,21 +188,25 @@ public final class SNavManager implements Listener {
     private void open(Player player) {
         Nav nav = new Nav();
         Frame f = frame(player);
-        // meter / title (NO background panel any more)
-        Location titleAt = f.pointOf(0, PANEL / 2f + 0.12f, 0.02);
+        float panel = panelSize();
+        float titleV = panel / 2f + 0.12f;
+        // meter / title (NO background panel any more) - VERTICAL billboard: yaws to face the
+        // reader but stays upright, so it never tips when they look up/down.
+        Location titleAt = f.pointOf(0, titleV, 0.02);
         nav.meter = player.getWorld().spawn(titleAt, TextDisplay.class, d -> {
-            d.setBillboard(Display.Billboard.CENTER);
+            d.setBillboard(Display.Billboard.VERTICAL);
             d.setAlignment(TextDisplay.TextAlignment.CENTER);
             d.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));   // transparent - no block behind it
             d.setBrightness(new Display.Brightness(15, 15));
             d.setViewRange(0.5f);
             d.setPersistent(false);
-            d.setTransformation(uniform(0.4f));
+            d.setTransformation(uniform(0.5f));
         });
-        nav.statics.add(new Part(nav.meter, 0, PANEL / 2f + 0.12f, 0.02f));
-        nav.statics.add(new Part(spawnDot(player, f.pointOf(0, 0, 0.03)), 0, 0, 0.03f));
+        nav.statics.add(new Part(nav.meter, 0, titleV, 0.02f));
+        float dotSize = panel / (2 * viewRadius() + 1) * 2.4f;
+        nav.statics.add(new Part(spawnDot(player, f.pointOf(0, 0, 0.03), dotSize), 0, 0, 0.03f));
 
-        map.scan(player, SCAN, scanY());
+        map.scan(player, scanRadius(), scanY());
         rebuild(player, nav, f);
         open.put(player.getUniqueId(), nav);
         player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.BLOCK_BEACON_ACTIVATE, 0.4f, 1.8f);
@@ -255,7 +245,7 @@ public final class SNavManager implements Listener {
                 }
             }
             Frame f = frame(p);
-            if (nav.ticks++ % REBUILD_TICKS == 0) { map.scan(p, SCAN, scanY()); rebuild(p, nav, f); }
+            if (nav.ticks++ % REBUILD_TICKS == 0) { map.scan(p, scanRadius(), scanY()); rebuild(p, nav, f); }
             updateMeter(nav, battery(held));
             for (Part part : nav.statics) reposition(part, f);
             for (Part part : nav.walls) reposition(part, f);
@@ -284,16 +274,18 @@ public final class SNavManager implements Listener {
         World w = player.getWorld();
         int px = player.getLocation().getBlockX();
         int pz = player.getLocation().getBlockZ();
-        float cell = PANEL / (2 * VIEW + 1);
+        int view = viewRadius();
+        float panel = panelSize();
+        float cell = panel / (2 * view + 1);
 
         // pull the scanned plane into a local grid centred on the player's X/Z
         Set<Long> band = map.band(w.getName(), scanY());
-        int size = 2 * VIEW + 1;
+        int size = 2 * view + 1;
         boolean[][] wall = new boolean[size][size];        // [ix][iz]
         for (long packed : band) {
             int dx = SNavMap.unpackX(packed) - px, dz = SNavMap.unpackZ(packed) - pz;
-            if (dx < -VIEW || dx > VIEW || dz < -VIEW || dz > VIEW) continue;
-            wall[dx + VIEW][dz + VIEW] = true;
+            if (dx < -view || dx > view || dz < -view || dz > view) continue;
+            wall[dx + view][dz + view] = true;
         }
         boolean[][] used = new boolean[size][size];
         int segments = 0;
@@ -308,7 +300,7 @@ public final class SNavManager implements Listener {
                 int len = ix - start;
                 if (len >= 2) {
                     for (int k = start; k < start + len; k++) used[k][iz] = true;
-                    addSegment(nav, f, w, cell, start, iz, len, true);
+                    addSegment(nav, f, w, panel, view, cell, start, iz, len, true);
                     if (++segments >= MAX_SEGMENTS) break;
                 }
             }
@@ -321,7 +313,7 @@ public final class SNavManager implements Listener {
                 int start = iz;
                 while (iz < size && wall[ix][iz] && !used[ix][iz]) iz++;
                 int len = iz - start;
-                addSegment(nav, f, w, cell, start, ix, len, false);
+                addSegment(nav, f, w, panel, view, cell, start, ix, len, false);
                 if (++segments >= MAX_SEGMENTS) break;
             }
         }
@@ -331,9 +323,9 @@ public final class SNavManager implements Listener {
             if (segments >= MAX_SEGMENTS) break;
             if (!a.world().equals(w.getName())) continue;
             int dx = (a.x1() + a.x2()) / 2 - px, dz = (a.z1() + a.z2()) / 2 - pz;
-            if (dx < -VIEW || dx > VIEW || dz < -VIEW || dz > VIEW) continue;
-            float u = (dx / (float) VIEW) * (PANEL / 2f);
-            float v = (-dz / (float) VIEW) * (PANEL / 2f);
+            if (dx < -view || dx > view || dz < -view || dz > view) continue;
+            float u = (dx / (float) view) * (panel / 2f);
+            float v = (-dz / (float) view) * (panel / 2f);
             nav.walls.add(new Part(spawnRect(w, f.pointOf(u, v, 0.015), Material.CYAN_CONCRETE,
                 cell * 1.6f, cell * 1.6f), u, v, 0.015f));
             segments++;
@@ -342,16 +334,17 @@ public final class SNavManager implements Listener {
 
     /** Add one merged line. {@code runStart} is the grid index where the run begins along its axis;
      *  {@code fixed} is the grid index of the perpendicular axis it sits on. */
-    private void addSegment(Nav nav, Frame f, World w, float cell, int runStart, int fixed, int len, boolean horizontal) {
-        float centreRun = (runStart + (len - 1) / 2f) - VIEW;   // run-centre offset in cells from player
+    private void addSegment(Nav nav, Frame f, World w, float panel, int view, float cell,
+                            int runStart, int fixed, int len, boolean horizontal) {
+        float centreRun = (runStart + (len - 1) / 2f) - view;   // run-centre offset in cells from player
         float u, v, width, height;
         if (horizontal) {
-            u = (centreRun / VIEW) * (PANEL / 2f);
-            v = (-(fixed - VIEW) / (float) VIEW) * (PANEL / 2f);
+            u = (centreRun / view) * (panel / 2f);
+            v = (-(fixed - view) / (float) view) * (panel / 2f);
             width = len * cell; height = cell;
         } else {
-            u = ((fixed - VIEW) / (float) VIEW) * (PANEL / 2f);
-            v = (-centreRun / VIEW) * (PANEL / 2f);
+            u = ((fixed - view) / (float) view) * (panel / 2f);
+            v = (-centreRun / view) * (panel / 2f);
             width = cell; height = len * cell;
         }
         nav.walls.add(new Part(spawnRect(w, f.pointOf(u, v, 0.01), Material.LIGHT_GRAY_CONCRETE,
@@ -384,7 +377,9 @@ public final class SNavManager implements Listener {
     private ItemDisplay spawnRect(World w, Location at, Material mat, float width, float height) {
         return w.spawn(at, ItemDisplay.class, disp -> {
             disp.setItemStack(new ItemStack(mat));
-            disp.setBillboard(Display.Billboard.CENTER);
+            // VERTICAL billboard: the cell yaws to face the reader but stays upright, so it never
+            // tips/rotates when the player looks up or down (the reported spin).
+            disp.setBillboard(Display.Billboard.VERTICAL);
             disp.setBrightness(new Display.Brightness(15, 15));
             disp.setPersistent(false);
             disp.setViewRange(0.5f);
@@ -394,11 +389,10 @@ public final class SNavManager implements Listener {
         });
     }
 
-    private ItemDisplay spawnDot(Player p, Location at) {
-        float s = PANEL / (2 * VIEW + 1) * 2.4f;
+    private ItemDisplay spawnDot(Player p, Location at, float s) {
         return p.getWorld().spawn(at, ItemDisplay.class, disp -> {
             disp.setItemStack(new ItemStack(Material.REDSTONE_BLOCK));
-            disp.setBillboard(Display.Billboard.CENTER);
+            disp.setBillboard(Display.Billboard.VERTICAL);
             disp.setBrightness(new Display.Brightness(15, 15));
             disp.setPersistent(false);
             disp.setViewRange(0.5f);

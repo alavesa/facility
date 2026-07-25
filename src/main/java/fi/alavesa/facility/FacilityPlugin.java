@@ -641,6 +641,13 @@ public final class FacilityPlugin extends JavaPlugin {
                 return areas.remove(args[2]) ? ok(sender, "Removed area '" + args[2] + "'.")
                     : error(sender, "No area named '" + args[2] + "'.");
             }
+            case "rename" -> {
+                if (args.length < 4) return error(sender, "/facility area rename <area> <newName>  "
+                    + "(fixes capitalisation, e.g. rename lcz LCZ)");
+                String problem = areas.rename(args[2], args[3]);
+                return problem != null ? error(sender, problem)
+                    : ok(sender, "Area '" + args[2] + "' is now shown as '" + args[3] + "'.");
+            }
             case "list" -> {
                 var all = areas.all();
                 if (all.isEmpty()) return ok(sender, "No areas defined yet.");
@@ -728,7 +735,7 @@ public final class FacilityPlugin extends JavaPlugin {
                     "move", "setlabel", "setaction"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
                 case "dailyreward" -> admin ? filter(Stream.of("edit", "currency", "days"), args[1]) : List.of();
-                case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "list",
+                case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "rename", "list",
                     "effect", "cleareffects", "scp008", "sound", "clearsounds"), args[1]) : List.of();
                 default -> List.of();
             };

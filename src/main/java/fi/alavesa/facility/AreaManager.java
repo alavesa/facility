@@ -113,6 +113,25 @@ public final class AreaManager {
         return true;
     }
 
+    /** Rename an area: update its DISPLAY name (fixing capitalisation on old areas without one),
+     *  moving its data if the key itself changes. Returns null on success, else why not. */
+    public String rename(String oldName, String newName) {
+        String oldKey = oldName.toLowerCase(Locale.ROOT);
+        String newKey = newName.toLowerCase(Locale.ROOT);
+        if (!cfg.isConfigurationSection("areas." + oldKey)) return "No area named '" + oldName + "'.";
+        if (!oldKey.equals(newKey)) {
+            if (cfg.isConfigurationSection("areas." + newKey)) return "An area '" + newName + "' already exists.";
+            for (var e : cfg.getConfigurationSection("areas." + oldKey).getValues(true).entrySet()) {
+                cfg.set("areas." + newKey + "." + e.getKey(), e.getValue());
+            }
+            cfg.set("areas." + oldKey, null);
+        }
+        cfg.set("areas." + newKey + ".display-name", newName);
+        save();
+        load();
+        return null;
+    }
+
     /** Add a potion effect ("TYPE:amplifier") to an area. Returns null on success. */
     public String addEffect(String name, String effect) {
         String key = name.toLowerCase(Locale.ROOT);

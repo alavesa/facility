@@ -48,7 +48,7 @@ public final class SNavManager implements Listener {
         this.batteryKey = new NamespacedKey(plugin, "snav_battery");
     }
 
-    private int batteryMax() { return Math.max(1, plugin.getConfig().getInt("snav.battery-max", 100)); }
+    public int batteryMax() { return Math.max(1, plugin.getConfig().getInt("snav.battery-max", 100)); }
     private int drainEvery() { return Math.max(1, plugin.getConfig().getInt("snav.battery-drain-seconds", 3)); }
     public int scanY() { return plugin.getConfig().getInt("snav.scan-y", 64); }
     public void setScanY(int y) { plugin.getConfig().set("snav.scan-y", y); plugin.saveConfig(); }
@@ -99,6 +99,14 @@ public final class SNavManager implements Listener {
             && item.getItemMeta().getPersistentDataContainer().has(snavKey, PersistentDataType.BYTE);
     }
 
+    /** The S-Nav the player is holding in EITHER hand (main first), or null. */
+    public ItemStack heldSnav(Player p) {
+        ItemStack m = p.getInventory().getItemInMainHand();
+        if (isSnav(m)) return m;
+        ItemStack o = p.getInventory().getItemInOffHand();
+        return isSnav(o) ? o : null;
+    }
+
     /** Same 9V battery as the Lab NVGs: any item whose custom_model_data carries "lab_battery". */
     private boolean isBattery(ItemStack item) {
         return item != null && item.hasItemMeta()
@@ -110,13 +118,14 @@ public final class SNavManager implements Listener {
             .getOrDefault(batteryKey, PersistentDataType.INTEGER, 0);
     }
 
-    /** Write a new charge WITHOUT disturbing the map view or anything else on the item. */
-    private void setBattery(Player p, ItemStack snav, int value) {
+    /** Write a new charge WITHOUT disturbing the map view, to whichever hand holds it. */
+    private void setBattery(Player p, ItemStack snav, int value, EquipmentSlot slot) {
         MapMeta meta = (MapMeta) snav.getItemMeta();
         meta.getPersistentDataContainer().set(batteryKey, PersistentDataType.INTEGER,
             Math.max(0, Math.min(batteryMax(), value)));
         snav.setItemMeta(meta);
-        p.getInventory().setItemInMainHand(snav);
+        if (slot == EquipmentSlot.OFF_HAND) p.getInventory().setItemInOffHand(snav);
+        else p.getInventory().setItemInMainHand(snav);
     }
 
     // --- interaction --------------------------------------------------------
@@ -139,7 +148,7 @@ public final class SNavManager implements Listener {
             Msg.actionbar(p, Component.text("No 9V batteries in your inventory.", NamedTextColor.RED));
             return;
         }
-        setBattery(p, held, batteryMax());
+        setBattery(p, held, batteryMax(), event.getHand());
         p.playSound(p.getLocation(), org.bukkit.Sound.BLOCK_BEACON_POWER_SELECT, 0.6f, 1.6f);
         Msg.actionbar(p, Component.text("9V battery loaded — S-Nav at 100%.", NamedTextColor.GREEN));
     }
@@ -168,14 +177,19 @@ public final class SNavManager implements Listener {
     public void tick() {
         int threshold = drainEvery() * 10;   // task runs every 2 ticks -> *10 per second-group
         for (Player p : plugin.getServer().getOnlinePlayers()) {
-            ItemStack held = p.getInventory().getItemInMainHand();
             UUID id = p.getUniqueId();
-            if (!isSnav(held) || battery(held) <= 0) { drainCounter.remove(id); continue; }
+            ItemStack main = p.getInventory().getItemInMainHand();
+            ItemStack off = p.getInventory().getItemInOffHand();
+            ItemStack held; EquipmentSlot slot;
+            if (isSnav(main)) { held = main; slot = EquipmentSlot.HAND; }
+            else if (isSnav(off)) { held = off; slot = EquipmentSlot.OFF_HAND; }
+            else { drainCounter.remove(id); continue; }
+            if (battery(held) <= 0) { drainCounter.remove(id); continue; }
             int n = drainCounter.getOrDefault(id, 0) + 1;
             if (n >= threshold) {
                 n = 0;
                 int left = battery(held) - 1;
-                setBattery(p, held, left);
+                setBattery(p, held, left, slot);
                 if (left <= 0) {
                     Msg.actionbar(p, Component.text("S-Nav battery depleted.", NamedTextColor.RED));
                     p.playSound(p.getLocation(), org.bukkit.Sound.BLOCK_BEACON_DEACTIVATE, 0.6f, 0.8f);

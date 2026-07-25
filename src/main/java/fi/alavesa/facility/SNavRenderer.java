@@ -8,6 +8,7 @@ import org.bukkit.map.MapCursor;
 import org.bukkit.map.MapCursorCollection;
 import org.bukkit.map.MapRenderer;
 import org.bukkit.map.MapView;
+import org.bukkit.map.MinecraftFont;
 
 import java.awt.Color;
 import java.util.HashMap;
@@ -31,7 +32,7 @@ public final class SNavRenderer extends MapRenderer {
     private static final Color WALL = new Color(214, 214, 220);
     private static final Color FLOOR = new Color(46, 46, 52);
     private static final Color VOID = new Color(16, 16, 20);
-    private static final Color DEAD = new Color(10, 10, 12);
+    private static final Color DEAD = new Color(0, 0, 0);   // battery flat -> completely dark screen
 
     private final FacilityPlugin plugin;
     private final SNavManager snav;
@@ -47,8 +48,8 @@ public final class SNavRenderer extends MapRenderer {
 
     @Override
     public void render(MapView view, MapCanvas canvas, Player player) {
-        ItemStack held = player.getInventory().getItemInMainHand();
-        if (!snav.isSnav(held)) return;   // only the holder's own device drives the picture
+        ItemStack held = snav.heldSnav(player);   // main OR off hand - so it works in the offhand
+        if (held == null) return;                 // (and never freezes because a hand check failed)
         UUID id = player.getUniqueId();
 
         if (snav.battery(held) <= 0) {
@@ -78,6 +79,23 @@ public final class SNavRenderer extends MapRenderer {
         sinceDraw.put(id, since);
 
         canvas.setCursors(cursors(player, c));
+        drawBattery(canvas, snav.battery(held), snav.batteryMax());
+    }
+
+    /** Battery readout across the top of the map: a coloured bar + the percentage. */
+    private void drawBattery(MapCanvas canvas, int battery, int max) {
+        int pct = Math.round(battery * 100f / Math.max(1, max));
+        int filled = Math.round(124 * Math.max(0, Math.min(1f, battery / (float) max)));
+        Color bar = pct <= 15 ? new Color(210, 45, 45)
+            : pct <= 40 ? new Color(220, 180, 45) : new Color(70, 200, 95);
+        Color empty = new Color(38, 38, 44);
+        for (int x = 2; x <= 125; x++) {
+            Color col = (x - 2) < filled ? bar : empty;
+            canvas.setPixelColor(x, 1, col);
+            canvas.setPixelColor(x, 2, col);
+        }
+        String code = pct <= 15 ? "§c" : pct <= 40 ? "§e" : "§a";
+        canvas.drawText(4, 4, MinecraftFont.Font, code + "BAT " + pct + "%");
     }
 
     private void drawMap(MapCanvas canvas, World w, int[] c) {

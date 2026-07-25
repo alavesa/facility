@@ -439,6 +439,9 @@ public final class StashManager implements Listener {
         return true;
     }
 
+    /** Hand a player physical credits (the daily-reward currency payout goes through here). */
+    public void giveCredits(Player p, int amount) { giveChange(p, amount); }
+
     /** Hand the player {@code amount} credits back as coins/bills (100s, 10s, 1s). */
     private void giveChange(Player p, int amount) {
         int rem = Math.max(0, amount);

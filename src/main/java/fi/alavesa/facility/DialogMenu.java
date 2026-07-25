@@ -139,8 +139,10 @@ public final class DialogMenu {
                 actions.append(button(legacy(el.label()), el.action()));
             }
         }
-        // Always offer the stats screen, regardless of the operator's button list.
+        // Always offer daily rewards + the stats screen, regardless of the operator's button list.
         if (actions.length() > 0) actions.append(",");
+        actions.append(button(Component.text("Daily Rewards", NamedTextColor.GREEN), "facility daily"));
+        actions.append(",");
         actions.append(button(Component.text("Stats", NamedTextColor.YELLOW), "facility stats"));
         return dialog("SITE-19 // MAIN MENU", String.join(",", body), actions.toString());
     }

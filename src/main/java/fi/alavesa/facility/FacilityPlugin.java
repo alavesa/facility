@@ -43,6 +43,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private StashManager stashes;
     private DailyRewardStore dailyRewards;
     private DailyRewardMenu dailyRewardMenu;
+    private SNavManager snav;
 
     private NamespacedKey teamKey;
 
@@ -75,6 +76,9 @@ public final class FacilityPlugin extends JavaPlugin {
         dailyRewards = new DailyRewardStore(this);
         dailyRewardMenu = new DailyRewardMenu(this, dailyRewards, stashes);
         getServer().getPluginManager().registerEvents(dailyRewardMenu, this);
+        snav = new SNavManager(this, areas);
+        getServer().getPluginManager().registerEvents(snav, this);
+        getServer().getScheduler().runTaskTimer(this, snav::tick, 40L, 2L);
         getServer().getScheduler().runTaskTimer(this, stashes::sweepOrphans, 200L, 1200L);
         getServer().getScheduler().runTaskTimer(this, lobby::menuFlagTick, 40L, 5L);   // keep credits-HUD yield flag matched to lobby state
         getServer().getScheduler().runTaskTimer(this, new InteractCrosshair(this), 40L, 2L);
@@ -97,6 +101,7 @@ public final class FacilityPlugin extends JavaPlugin {
     public void onDisable() {
         if (blackout != null && blackout.isActive()) blackout.end();   // restore lights
         if (combat != null) combat.shutdown();
+        if (snav != null) snav.closeAll();   // despawn floating map holograms
         // TextDisplay holograms are entities and despawn/expire on their own;
         // nothing persistent to clean beyond the boss bars above.
         getLogger().info("SITE-19 FACILITY // offline");
@@ -194,6 +199,18 @@ public final class FacilityPlugin extends JavaPlugin {
             }
             case "dailyreward" -> {
                 return handleDailyReward(sender, args);
+            }
+            case "snav" -> {
+                // Give the S-Nav navigator item (ops / creative). Right-click it to project the map.
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                Player target = args.length >= 2 ? Bukkit.getPlayerExact(args[1])
+                    : (sender instanceof Player p ? p : null);
+                if (target == null) return error(sender, "Player not found.");
+                target.getInventory().addItem(snav.buildItem()).values().forEach(left ->
+                    target.getWorld().dropItemNaturally(target.getLocation(), left));
+                sender.sendMessage(Component.text("S-Nav Navigator given to " + target.getName()
+                    + " - right-click it to project the site map.", NamedTextColor.AQUA));
+                return true;
             }
             case "area" -> {
                 return handleArea(sender, args);
@@ -669,7 +686,7 @@ public final class FacilityPlugin extends JavaPlugin {
         return switch (args.length) {
             case 1 -> {
                 List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "daily"));
-                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area", "dailyreward"));
+                if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area", "dailyreward", "snav"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {

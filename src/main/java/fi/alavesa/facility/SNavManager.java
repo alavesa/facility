@@ -49,7 +49,7 @@ public final class SNavManager implements Listener {
     }
 
     public int batteryMax() { return Math.max(1, plugin.getConfig().getInt("snav.battery-max", 100)); }
-    private int drainEvery() { return Math.max(1, plugin.getConfig().getInt("snav.battery-drain-seconds", 3)); }
+    private int drainEvery() { return Math.max(1, plugin.getConfig().getInt("snav.battery-drain-seconds", 8)); }
     public int scanY() { return plugin.getConfig().getInt("snav.scan-y", 64); }
     public void setScanY(int y) { plugin.getConfig().set("snav.scan-y", y); plugin.saveConfig(); }
 

@@ -8,7 +8,6 @@ import org.bukkit.map.MapCursor;
 import org.bukkit.map.MapCursorCollection;
 import org.bukkit.map.MapRenderer;
 import org.bukkit.map.MapView;
-import org.bukkit.map.MinecraftFont;
 
 import java.awt.Color;
 import java.util.HashMap;
@@ -27,7 +26,6 @@ public final class SNavRenderer extends MapRenderer {
 
     private static final int HALF = 64;              // 128px map, centre pixel = 64
     private static final int RECENTER_MARGIN = 10;   // recentre when this close to the edge
-    private static final int REDRAW_EVERY = 200;     // periodic refresh (renders) to catch changes
 
     private static final Color WALL = new Color(214, 214, 220);
     private static final Color FLOOR = new Color(46, 46, 52);
@@ -37,8 +35,14 @@ public final class SNavRenderer extends MapRenderer {
     private final FacilityPlugin plugin;
     private final SNavManager snav;
     private final Map<UUID, int[]> center = new HashMap<>();
-    private final Map<UUID, Integer> sinceDraw = new HashMap<>();
+    private final Map<UUID, Long> lastDraw = new HashMap<>();   // wall-clock of last map redraw
     private final Map<UUID, Boolean> wasDead = new HashMap<>();
+
+    /** How rarely the map picture itself refreshes (recentres always redraw). Kept slow so the
+     *  map isn't visibly re-rendering under the player's nose every few seconds. */
+    private long refreshMillis() {
+        return Math.max(2, plugin.getConfig().getInt("snav.refresh-seconds", 30)) * 1000L;
+    }
 
     public SNavRenderer(FacilityPlugin plugin, SNavManager snav) {
         super(true);   // contextual: per-player canvas + render call
@@ -65,37 +69,42 @@ public final class SNavRenderer extends MapRenderer {
         int px = player.getLocation().getBlockX();
         int pz = player.getLocation().getBlockZ();
         int[] c = center.get(id);
-        int since = sinceDraw.getOrDefault(id, REDRAW_EVERY) + 1;
+        long now = System.currentTimeMillis();
         boolean redraw = false;
         if (c == null || Math.abs(px - c[0]) > HALF - RECENTER_MARGIN
             || Math.abs(pz - c[1]) > HALF - RECENTER_MARGIN) {
             c = new int[]{px, pz};      // stepped out of bounds -> recentre on the player
             center.put(id, c);
             redraw = true;
-        } else if (since >= REDRAW_EVERY) {
-            redraw = true;
+        } else if (now - lastDraw.getOrDefault(id, 0L) >= refreshMillis()) {
+            redraw = true;              // slow periodic refresh to catch door/build changes
         }
-        if (redraw) { drawMap(canvas, player.getWorld(), c); since = 0; }
-        sinceDraw.put(id, since);
+        if (redraw) { drawMap(canvas, player.getWorld(), c); lastDraw.put(id, now); }
 
         canvas.setCursors(cursors(player, c));
         drawBattery(canvas, snav.battery(held), snav.batteryMax());
     }
 
-    /** Battery readout across the top of the map: a coloured bar + the percentage. */
+    /** Battery readout: five bars in the TOP-RIGHT corner that empty one at a time as it drains. */
     private void drawBattery(MapCanvas canvas, int battery, int max) {
-        int pct = Math.round(battery * 100f / Math.max(1, max));
-        int filled = Math.round(124 * Math.max(0, Math.min(1f, battery / (float) max)));
-        Color bar = pct <= 15 ? new Color(210, 45, 45)
-            : pct <= 40 ? new Color(220, 180, 45) : new Color(70, 200, 95);
-        Color empty = new Color(38, 38, 44);
-        for (int x = 2; x <= 125; x++) {
-            Color col = (x - 2) < filled ? bar : empty;
-            canvas.setPixelColor(x, 1, col);
-            canvas.setPixelColor(x, 2, col);
+        float frac = Math.max(0f, Math.min(1f, battery / (float) Math.max(1, max)));
+        int lit = (int) Math.ceil(frac * 5f);   // 0..5 bars lit
+        Color fill = frac <= 0.15f ? new Color(210, 45, 45)
+            : frac <= 0.40f ? new Color(220, 180, 45) : new Color(70, 200, 95);
+        Color empty = new Color(40, 40, 46);
+        Color frame = new Color(12, 12, 16);
+        int bw = 4, gap = 1, h = 9, top = 3;
+        int startX = 128 - 3 - (5 * bw + 4 * gap);   // right-aligned, ~3px margin
+        for (int i = 0; i < 5; i++) {
+            int x0 = startX + i * (bw + gap);
+            Color col = i < lit ? fill : empty;
+            for (int x = x0 - 1; x <= x0 + bw; x++)      // thin dark frame around each bar
+                for (int y = top - 1; y <= top + h; y++)
+                    canvas.setPixelColor(x, y, frame);
+            for (int x = x0; x < x0 + bw; x++)
+                for (int y = top; y < top + h; y++)
+                    canvas.setPixelColor(x, y, col);
         }
-        String code = pct <= 15 ? "§c" : pct <= 40 ? "§e" : "§a";
-        canvas.drawText(4, 4, MinecraftFont.Font, code + "BAT " + pct + "%");
     }
 
     private void drawMap(MapCanvas canvas, World w, int[] c) {
@@ -143,7 +152,7 @@ public final class SNavRenderer extends MapRenderer {
     /** Drop cached per-player state (called when a player leaves). */
     public void forget(UUID id) {
         center.remove(id);
-        sinceDraw.remove(id);
+        lastDraw.remove(id);
         wasDead.remove(id);
     }
 }

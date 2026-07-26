@@ -6,7 +6,7 @@
 
   <groupId>fi.alavesa</groupId>
   <artifactId>facility-plugin</artifactId>
-  <version>0.9.2</version>
+  <version>0.9.3</version>
   <packaging>jar</packaging>
 
   <name>Facility</name>

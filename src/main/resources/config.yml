@@ -120,6 +120,14 @@ teams:
     prefix: "&c[MTF] "
     permissions:
       - facility.team.mtf
+  et:
+    display: "&bE&T Department"
+    type: public
+    rank: et
+    icon: BRUSH
+    prefix: "&b[E&T] "
+    permissions:
+      - facility.team.et
 
 # Per-team grant list for PRIVATE teams. Managed at runtime by
 # /facility grant|revoke - each entry is a player UUID. Do not hand-edit

@@ -67,6 +67,11 @@ public final class LobbyManager implements Listener {
     /** Players who just died: their next PLAY deploys at a team spawn, not their
      *  old position. A normal rejoin (no death) returns to where they were. */
     private final Set<UUID> deadPendingSpawn = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    /** Players whose next deploy should re-apply their team's starter kit (set on join + respawn). */
+    private final Set<UUID> kitPending = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /** Mark that this player should be handed their team's starter kit the next time they deploy. */
+    public void markKitPending(UUID id) { kitPending.add(id); }
 
 
 
@@ -188,8 +193,9 @@ public final class LobbyManager implements Listener {
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         if (inCctv(player)) return;   // don't hijack a CCTV session
-        // They died: next PLAY should use the team spawn, not their old position.
+        // They died: next PLAY should use the team spawn, not their old position, and re-issue the kit.
         deadPendingSpawn.add(player.getUniqueId());
+        kitPending.add(player.getUniqueId());
         // Send them to the main menu now that the respawn screen is gone.
         continued.remove(player.getUniqueId());
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> beginMenu(player), 2L);
@@ -452,6 +458,10 @@ public final class LobbyManager implements Listener {
         continued.add(player.getUniqueId());
         player.closeInventory();
         player.setGameMode(store.lastGameMode(player.getUniqueId()));
+        // Hand over the team's starter kit if this deploy follows a team-join or a respawn.
+        if (kitPending.remove(player.getUniqueId())) {
+            plugin.kits().apply(player, store.getTeam(player.getUniqueId()));
+        }
         if (dest == null) dest = player.getWorld().getSpawnLocation();
         player.teleport(dest);
         player.sendMessage(Component.text("Welcome to Site-19. Stay sharp.", NamedTextColor.AQUA));

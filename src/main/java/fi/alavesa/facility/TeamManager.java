@@ -116,6 +116,17 @@ public final class TeamManager {
         load();
     }
 
+    /** Set a team's on-screen display name (supports &amp; colour codes and spaces). Returns false if
+     *  the team doesn't exist. The selector shows this, so it's how you give a team a coloured name. */
+    public boolean setDisplay(String id, String display) {
+        String key = id.toLowerCase(Locale.ROOT);
+        if (teams.get(key) == null) return false;
+        plugin.getConfig().set("teams." + key + ".display", display);
+        plugin.saveConfig();
+        load();
+        return true;
+    }
+
     /** Remove a team (and any grants to it), persisting. Returns false if unknown. */
     public boolean remove(String id) {
         String key = id.toLowerCase(Locale.ROOT);

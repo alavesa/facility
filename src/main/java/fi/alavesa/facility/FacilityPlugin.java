@@ -46,9 +46,12 @@ public final class FacilityPlugin extends JavaPlugin {
     private SNavManager snav;
 
     private NamespacedKey teamKey;
+    private KitStore kits;
+    private KitEditor kitEditor;
 
     public PlayerStore store() { return store; }
     public AreaManager areas() { return areas; }
+    public KitStore kits() { return kits; }
 
     @Override
     public void onEnable() {
@@ -58,6 +61,7 @@ public final class FacilityPlugin extends JavaPlugin {
         store = new PlayerStore(this);
         teams = new TeamManager(this);
         teams.load();
+        kits = new KitStore(this);   // before lobby: deploy applies the team kit
 
         menuStore = new MenuStore(this);
         dialogMenu = new DialogMenu(this, teams, menuStore);
@@ -66,7 +70,9 @@ public final class FacilityPlugin extends JavaPlugin {
         menuEditor = new MenuEditor(this, menuStore);
         blackout = new BlackoutManager(this);
         areas = new AreaManager(this);
+        kitEditor = new KitEditor(this, kits);
 
+        getServer().getPluginManager().registerEvents(kitEditor, this);
         getServer().getPluginManager().registerEvents(lobby, this);
         getServer().getPluginManager().registerEvents(combat, this);
         getServer().getPluginManager().registerEvents(menuEditor, this);
@@ -261,6 +267,15 @@ public final class FacilityPlugin extends JavaPlugin {
             case "team" -> {
                 return handleTeam(sender, args);
             }
+            case "kit" -> {
+                if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+                if (!(sender instanceof Player admin)) return error(sender, "Players only.");
+                if (args.length < 2) return error(sender, "/facility kit <team>  - edit that team's starter kit");
+                Team t = teams.get(args[1]);
+                if (t == null) return error(sender, "No team named '" + args[1] + "'.");
+                kitEditor.open(admin, t.id(), t.display());
+                return true;
+            }
             case "grant" -> {
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
                 if (args.length < 3) return error(sender, "/facility grant <player> <team>");
@@ -275,6 +290,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
                 reloadConfig();
                 teams.load();
+                kits.reload();
                 sender.sendMessage(Component.text("Facility config reloaded - teams: "
                     + teams.ids(), NamedTextColor.AQUA));
                 return true;
@@ -325,6 +341,19 @@ public final class FacilityPlugin extends JavaPlugin {
                 + (priv ? "private" : "public") + ", rank " + args[4] + ", icon " + icon.name()
                 + (prefix.isBlank() ? "" : ", prefix " + prefix) + "). Edit permissions in config.yml.",
                 NamedTextColor.AQUA));
+            return true;
+        }
+        if (sub.equals("display")) {
+            if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
+            if (args.length < 4) return error(sender,
+                "/facility team display <name> <display text...>  (e.g. &bE&T Department)");
+            String display = String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length));
+            if (!teams.setDisplay(args[2], display))
+                return error(sender, "No team named '" + args[2] + "'.");
+            sender.sendMessage(Component.text("Display name for '" + args[2].toLowerCase(Locale.ROOT)
+                + "' set to ", NamedTextColor.AQUA)
+                .append(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+                    .legacyAmpersand().deserialize(display)));
             return true;
         }
         if (sub.equals("remove")) {
@@ -418,6 +447,7 @@ public final class FacilityPlugin extends JavaPlugin {
         }
         teams.applyRank(player, team);
         store.setTeam(player.getUniqueId(), team.id());   // Continue + respawn use its spawn
+        lobby.markKitPending(player.getUniqueId());        // hand them this team's starter kit on deploy
         player.sendMessage(Component.text("You joined ", NamedTextColor.GREEN)
             .append(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
                 .legacyAmpersand().deserialize(team.display()))
@@ -720,16 +750,17 @@ public final class FacilityPlugin extends JavaPlugin {
             case 1 -> {
                 List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "daily"));
                 if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area",
-                    "dailyreward", "snav", "snavplane"));
+                    "dailyreward", "snav", "snavplane", "kit"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "team" -> {
                     List<String> opts = new ArrayList<>(teams.ids());
-                    opts.addAll(List.of("add", "remove", "setspawn", "addspawn", "delspawn",
+                    opts.addAll(List.of("add", "remove", "display", "setspawn", "addspawn", "delspawn",
                         "spawns", "spawnmode"));
                     yield filter(opts.stream(), args[1]);
                 }
+                case "kit" -> admin ? filter(teams.ids().stream(), args[1]) : List.of();
                 case "grant", "revoke" -> filter(online(), args[1]);
                 case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
                     "move", "setlabel", "setaction"), args[1]) : List.of();
@@ -740,7 +771,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {
-                case "team" -> Stream.of("remove", "setspawn", "addspawn", "delspawn", "spawns", "spawnmode")
+                case "team" -> Stream.of("remove", "display", "setspawn", "addspawn", "delspawn", "spawns", "spawnmode")
                     .anyMatch(args[1]::equalsIgnoreCase)
                     ? filter(teams.ids().stream(), args[2]) : List.of();
                 case "grant", "revoke" -> filter(privateTeamIds(), args[2]);

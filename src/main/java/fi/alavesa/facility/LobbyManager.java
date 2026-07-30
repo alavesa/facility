@@ -104,6 +104,10 @@ public final class LobbyManager implements Listener {
             return;
         }
         plugin.getLogger().info("[Facility] join: " + player.getName() + " -> opening lobby menu.");
+        // Capture the REAL gamemode Minecraft just restored (what they logged out as) BEFORE we
+        // lock them to spectator - so pressing Play restores that, not a stale saved value. This is
+        // the fix for survival players being dropped into creative on Play.
+        if (player.getGameMode() != GameMode.SPECTATOR) store.saveGameMode(id, player.getGameMode());
         // Lock to spectator IMMEDIATELY so there's no delay where they see/fall through the
         // world before the menu appears. The dialog itself opens on the very next tick.
         try { player.setGameMode(GameMode.SPECTATOR); } catch (Exception ignored) { }

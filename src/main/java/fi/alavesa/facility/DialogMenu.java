@@ -238,6 +238,20 @@ public final class DialogMenu {
     /** A multi_action dialog: title, a body (raw SNBT element CSV), a column of
      *  action buttons, un-escapable so it doubles as the lobby lock. Callers
      *  pass the body already serialized (so it can carry the bg glyph). */
+    /** Warn a player before they switch teams, since it wipes their current playthrough. Yes runs
+     *  the confirmed team change; No returns to the team selector. */
+    public void openTeamChangeConfirm(Player player, Team newTeam) {
+        String actions =
+            button(Component.text("Yes — change teams (wipes my playthrough & items)", NamedTextColor.RED),
+                "facility teamconfirm " + newTeam.id())
+            + "," + button(Component.text("« No, keep my current team", NamedTextColor.GRAY), "facility teams");
+        Component warn = Component.text("Switching to ", NamedTextColor.GRAY)
+            .append(legacy(newTeam.display()))
+            .append(Component.text(" will WIPE your current playthrough — your saved position and ALL your items. "
+                + "Are you sure?", NamedTextColor.RED));
+        show(player, dialog("CHANGE TEAM?", "{type:\"minecraft:plain_message\",contents:" + json(warn) + "}", actions));
+    }
+
     private String dialog(String title, String bodyCsv, String actionsCsv) {
         return "{type:\"minecraft:multi_action\""
             + ",title:" + json(Component.text(title, NamedTextColor.GOLD, TextDecoration.BOLD))

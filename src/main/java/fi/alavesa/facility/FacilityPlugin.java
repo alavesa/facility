@@ -267,6 +267,14 @@ public final class FacilityPlugin extends JavaPlugin {
             case "team" -> {
                 return handleTeam(sender, args);
             }
+            case "teamconfirm" -> {   // the "yes" button of the change-team warning
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (args.length < 2) { openTeams(player); return true; }
+                Team team = teams.get(args[1]);
+                if (team == null || !teams.mayJoin(team, player)) { openTeams(player); return true; }
+                joinTeam(player, team, true);   // confirmed -> wipe the old playthrough + items
+                return true;
+            }
             case "kit" -> {
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
                 if (!(sender instanceof Player admin)) return error(sender, "Players only.");
@@ -445,16 +453,36 @@ public final class FacilityPlugin extends JavaPlugin {
             openTeams(player);   // the dialog closed on click; reopen it, don't strand them
             return true;
         }
+        // Switching to a DIFFERENT team while you have a saved playthrough wipes it - so warn first.
+        String current = store.getTeam(player.getUniqueId());
+        boolean switching = current != null && !current.equalsIgnoreCase(team.id());
+        boolean hasPlaythrough = store.lastLocation(player.getUniqueId()) != null;
+        if (switching && hasPlaythrough) {
+            dialogMenu.openTeamChangeConfirm(player, team);
+            return true;
+        }
+        joinTeam(player, team, false);   // first team, or re-picking your own: no wipe
+        return true;
+    }
+
+    /** Actually put a player on a team. If {@code wipe}, their saved playthrough (position) and
+     *  their whole inventory are cleared first - a fresh start on the new team. */
+    private void joinTeam(Player player, Team team, boolean wipe) {
+        java.util.UUID id = player.getUniqueId();
+        if (wipe) {
+            store.clearLast(id);                                  // deploy fresh at the team spawn
+            player.getInventory().clear();
+            player.getInventory().setArmorContents(new org.bukkit.inventory.ItemStack[4]);
+            player.getInventory().setItemInOffHand(null);
+        }
         teams.applyRank(player, team);
-        store.setTeam(player.getUniqueId(), team.id());   // Continue + respawn use its spawn
-        lobby.markKitPending(player.getUniqueId());        // hand them this team's starter kit on deploy
+        store.setTeam(id, team.id());                             // Continue + respawn use its spawn
+        lobby.markKitPending(id);                                 // hand them this team's starter kit on deploy
         player.sendMessage(Component.text("You joined ", NamedTextColor.GREEN)
             .append(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
                 .legacyAmpersand().deserialize(team.display()))
-            .append(Component.text(".", NamedTextColor.GREEN)));
-        // Back to the main menu so they can press PLAY to leave spectator.
-        lobby.openMainMenu(player);
-        return true;
+            .append(Component.text(wipe ? " (playthrough wiped)." : ".", NamedTextColor.GREEN)));
+        lobby.openMainMenu(player);   // back to the menu so they can press PLAY
     }
 
     /**

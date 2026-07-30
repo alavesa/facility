@@ -69,6 +69,23 @@ public final class PlayerStore {
         write(player.getUniqueId(), cfg);
     }
 
+    /** Persist ONLY the gamemode (spectator -> survival), without touching the saved position.
+     *  Called on join with the player's real vanilla-restored gamemode, so a stale value can never
+     *  put a survival player back in creative when they press Play. */
+    public void saveGameMode(UUID id, GameMode gm) {
+        if (gm == GameMode.SPECTATOR) gm = GameMode.SURVIVAL;
+        YamlConfiguration cfg = read(id);
+        cfg.set("last.gamemode", gm.name());
+        write(id, cfg);
+    }
+
+    /** Wipe a player's saved playthrough (logout position + gamemode) - used when they change teams. */
+    public void clearLast(UUID id) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("last", null);
+        write(id, cfg);
+    }
+
     /** The saved logout location, or null if we've never seen them. */
     public Location lastLocation(UUID id) {
         YamlConfiguration cfg = read(id);

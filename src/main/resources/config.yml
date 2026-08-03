@@ -128,6 +128,14 @@ teams:
     prefix: "&b[E&T] "
     permissions:
       - facility.team.et
+  logistics:
+    display: "&6Logistics"
+    type: public
+    rank: logistics
+    icon: BARREL
+    prefix: "&6[Logistics] "
+    permissions:
+      - facility.team.logistics
 
 # Per-team grant list for PRIVATE teams. Managed at runtime by
 # /facility grant|revoke - each entry is a player UUID. Do not hand-edit

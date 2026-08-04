@@ -197,6 +197,10 @@ public final class LobbyManager implements Listener {
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
         if (inCctv(player)) return;   // don't hijack a CCTV session
+        // Capture the REAL gamemode they just respawned in BEFORE beginMenu locks them to spectator -
+        // exactly like onJoin does. Without this, PLAY restores a STALE saved gamemode, which is the
+        // bug where a player who was once in creative respawns back into creative after dying.
+        if (player.getGameMode() != GameMode.SPECTATOR) store.saveGameMode(player.getUniqueId(), player.getGameMode());
         // They died: next PLAY should use the team spawn, not their old position, and re-issue the kit.
         deadPendingSpawn.add(player.getUniqueId());
         kitPending.add(player.getUniqueId());

@@ -41,8 +41,6 @@ public final class FacilityPlugin extends JavaPlugin {
     private BlackoutManager blackout;
     private AreaManager areas;
     private StashManager stashes;
-    private DailyRewardStore dailyRewards;
-    private DailyRewardMenu dailyRewardMenu;
     private SNavManager snav;
 
     private NamespacedKey teamKey;
@@ -79,9 +77,6 @@ public final class FacilityPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new StatsListener(store), this);
         stashes = new StashManager(this);
         getServer().getPluginManager().registerEvents(stashes, this);
-        dailyRewards = new DailyRewardStore(this);
-        dailyRewardMenu = new DailyRewardMenu(this, dailyRewards, stashes);
-        getServer().getPluginManager().registerEvents(dailyRewardMenu, this);
         snav = new SNavManager(this);
         snav.init();
         getServer().getPluginManager().registerEvents(snav, this);
@@ -194,28 +189,6 @@ public final class FacilityPlugin extends JavaPlugin {
                 lobby.menuInteracted(player);   // stop join re-sends from clobbering this dialog
                 dialogMenu.openStats(player);
                 return true;
-            }
-            case "daily" -> {
-                // Main-menu "Daily Rewards" button: open the claim DIALOG (Back on top + a day per button).
-                if (!(sender instanceof Player player)) return error(sender, "Players only.");
-                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
-                lobby.menuInteracted(player);   // stop join re-sends from clobbering this
-                dialogMenu.openDaily(player, dailyRewards);
-                return true;
-            }
-            case "dailyclaim" -> {
-                // A day button in the daily-rewards dialog: try to claim it, then reopen the dialog.
-                if (!(sender instanceof Player player)) return error(sender, "Players only.");
-                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
-                int day;
-                try { day = Integer.parseInt(args[1]); }
-                catch (Exception e) { return error(sender, "Pick a day from the menu."); }
-                dailyRewardMenu.claim(player, day);
-                dialogMenu.openDaily(player, dailyRewards);
-                return true;
-            }
-            case "dailyreward" -> {
-                return handleDailyReward(sender, args);
             }
             case "snav" -> {
                 // Give the S-Nav navigator item (ops / creative). Right-click it to project the map.
@@ -633,44 +606,6 @@ public final class FacilityPlugin extends JavaPlugin {
         dialogMenu.openTeams(player);
     }
 
-    /** /facility dailyreward edit | currency <day> <amount> | days <n> */
-    private boolean handleDailyReward(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
-        if (!(sender instanceof Player player)) return error(sender, "Players only.");
-        String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
-        switch (sub) {
-            case "edit" -> {
-                dailyRewardMenu.openEditor(player);
-                return true;
-            }
-            case "currency" -> {
-                if (args.length < 4) return error(sender, "/facility dailyreward currency <day> <amount>");
-                int day, amount;
-                try { day = Integer.parseInt(args[2]); amount = Integer.parseInt(args[3]); }
-                catch (NumberFormatException e) { return error(sender, "day and amount must be numbers."); }
-                if (day < 1 || day > dailyRewards.days())
-                    return error(sender, "Day must be 1.." + dailyRewards.days() + " (raise it with 'days').");
-                dailyRewards.setCurrency(day, amount);
-                sender.sendMessage(Component.text("Day " + day + " now pays " + amount
-                    + " Credits.", NamedTextColor.AQUA));
-                return true;
-            }
-            case "days" -> {
-                if (args.length < 3) return error(sender, "/facility dailyreward days <n>  (current: "
-                    + dailyRewards.days() + ")");
-                int n;
-                try { n = Integer.parseInt(args[2]); }
-                catch (NumberFormatException e) { return error(sender, "n must be a number (1-54)."); }
-                dailyRewards.setDays(n);
-                sender.sendMessage(Component.text("Daily-reward cycle is now " + dailyRewards.days()
-                    + " day(s).", NamedTextColor.AQUA));
-                return true;
-            }
-            default -> {
-                return error(sender, "/facility dailyreward edit | currency <day> <amount> | days <n>");
-            }
-        }
-    }
 
     private boolean handleArea(CommandSender sender, String[] args) {
         if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
@@ -776,9 +711,9 @@ public final class FacilityPlugin extends JavaPlugin {
         boolean admin = sender.hasPermission("facility.admin");
         return switch (args.length) {
             case 1 -> {
-                List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "daily"));
+                List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats"));
                 if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area",
-                    "dailyreward", "snav", "snavplane", "kit"));
+                    "snav", "snavplane", "kit"));
                 yield filter(top.stream(), args[0]);
             }
             case 2 -> switch (args[0].toLowerCase(Locale.ROOT)) {
@@ -793,7 +728,6 @@ public final class FacilityPlugin extends JavaPlugin {
                 case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
                     "move", "setlabel", "setaction"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
-                case "dailyreward" -> admin ? filter(Stream.of("edit", "currency", "days"), args[1]) : List.of();
                 case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "rename", "list",
                     "effect", "cleareffects", "scp008", "sound", "clearsounds"), args[1]) : List.of();
                 default -> List.of();

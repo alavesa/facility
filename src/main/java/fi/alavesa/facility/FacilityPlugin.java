@@ -77,6 +77,7 @@ public final class FacilityPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new StatsListener(store), this);
         stashes = new StashManager(this);
         getServer().getPluginManager().registerEvents(stashes, this);
+        getServer().getPluginManager().registerEvents(new SettingsMenu(this), this);
         snav = new SNavManager(this);
         snav.init();
         getServer().getPluginManager().registerEvents(snav, this);

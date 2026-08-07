@@ -78,6 +78,7 @@ public final class FacilityPlugin extends JavaPlugin {
         stashes = new StashManager(this);
         getServer().getPluginManager().registerEvents(stashes, this);
         getServer().getPluginManager().registerEvents(new SettingsMenu(this), this);
+        getServer().getPluginManager().registerEvents(new BreakableManager(this, areas), this);
         snav = new SNavManager(this);
         snav.init();
         getServer().getPluginManager().registerEvents(snav, this);
@@ -669,6 +670,14 @@ public final class FacilityPlugin extends JavaPlugin {
                 return areas.setScp008(args[2], on) ? ok(sender, "SCP-008 infection " + (on ? "on" : "off")
                     + " for '" + args[2] + "'.") : error(sender, "No area named '" + args[2] + "'.");
             }
+            case "breakable" -> {
+                if (args.length < 4) return error(sender, "/facility area breakable <name> <on|off>");
+                boolean on = args[3].equalsIgnoreCase("on");
+                return areas.setBreakable(args[2], on) ? ok(sender, "Breakable blocks " + (on ? "on" : "off")
+                    + " for '" + args[2] + "' (destructible by explosions/breaking, respawn "
+                    + getConfig().getInt("breakable.respawn-seconds", 60) + "s).")
+                    : error(sender, "No area named '" + args[2] + "'.");
+            }
             case "sound" -> {
                 // /facility area sound <name> <soundkey> [volume] [pitch] [everySeconds]
                 // soundkey can be any vanilla or RESOURCE-PACK sound event (e.g. lab:ambient.reactor).
@@ -730,7 +739,7 @@ public final class FacilityPlugin extends JavaPlugin {
                     "move", "setlabel", "setaction"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
                 case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "rename", "list",
-                    "effect", "cleareffects", "scp008", "sound", "clearsounds"), args[1]) : List.of();
+                    "effect", "cleareffects", "scp008", "breakable", "sound", "clearsounds"), args[1]) : List.of();
                 default -> List.of();
             };
             case 3 -> switch (args[0].toLowerCase(Locale.ROOT)) {

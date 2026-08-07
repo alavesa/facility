@@ -29,7 +29,7 @@ import java.util.UUID;
 public final class AreaManager {
 
     public record Area(String name, String world, int x1, int y1, int z1, int x2, int y2, int z2,
-                       List<String> effects, boolean scp008, List<String> sounds) {
+                       List<String> effects, boolean scp008, List<String> sounds, boolean breakable) {
         boolean contains(Location l) {
             if (l.getWorld() == null || !l.getWorld().getName().equals(world)) return false;
             int x = l.getBlockX(), y = l.getBlockY(), z = l.getBlockZ();
@@ -63,7 +63,7 @@ public final class AreaManager {
                 cfg.getInt(p + "x1"), cfg.getInt(p + "y1"), cfg.getInt(p + "z1"),
                 cfg.getInt(p + "x2"), cfg.getInt(p + "y2"), cfg.getInt(p + "z2"),
                 cfg.getStringList(p + "effects"), cfg.getBoolean(p + "scp008", false),
-                cfg.getStringList(p + "sounds")));
+                cfg.getStringList(p + "sounds"), cfg.getBoolean(p + "breakable", false)));
         }
     }
 
@@ -177,6 +177,22 @@ public final class AreaManager {
         save();
         load();
         return true;
+    }
+
+    /** Mark an area's blocks as breakable (destructible + self-respawning). */
+    public boolean setBreakable(String name, boolean on) {
+        String key = name.toLowerCase(Locale.ROOT);
+        if (!areas.containsKey(key)) return false;
+        cfg.set("areas." + key + ".breakable", on);
+        save();
+        load();
+        return true;
+    }
+
+    /** Is this block inside any area flagged breakable? */
+    public boolean isBreakable(Location l) {
+        for (Area a : areas.values()) if (a.breakable() && a.contains(l)) return true;
+        return false;
     }
 
     // --- lookup -------------------------------------------------------------

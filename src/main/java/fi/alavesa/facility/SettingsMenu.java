@@ -84,7 +84,12 @@ public final class SettingsMenu implements Listener {
     }
 
     @EventHandler public void onOpen(InventoryOpenEvent event) {
-        if (event.getPlayer() instanceof Player p) scanUnlocks(p);
+        if (event.getPlayer() instanceof Player p) { scanUnlocks(p); clearCursorButton(p); }
+    }
+
+    /** A UI button must never end up stuck on the cursor (the "settings icon on the mouse-tip" bug). */
+    private void clearCursorButton(Player p) {
+        if (isButton(p.getItemOnCursor())) p.setItemOnCursor(null);
     }
 
     @EventHandler public void onPickup(EntityPickupItemEvent event) {
@@ -143,7 +148,32 @@ public final class SettingsMenu implements Listener {
             return;
         }
         if (isButton(event.getCurrentItem()) || isButton(event.getCursor())) { event.setCancelled(true); return; }
-        if (event.getClick() == ClickType.NUMBER_KEY && ownInv && isButtonSlot(event.getSlot())) event.setCancelled(true);
+        if (event.getClick() == ClickType.NUMBER_KEY && ownInv && isButtonSlot(event.getSlot())) { event.setCancelled(true); return; }
+
+        // SCP:CB-style inventory: clicking an item in your own survival inventory EQUIPS it instead of
+        // dragging it to the cursor. Right-click -> main hand, left-click -> offhand. (Creative is left
+        // alone so builders can arrange items normally.)
+        if (ownInv && p.getGameMode() != org.bukkit.GameMode.CREATIVE
+            && p.getOpenInventory().getTopInventory().getType() == org.bukkit.event.inventory.InventoryType.CRAFTING
+            && event.getSlot() >= 0 && event.getSlot() <= 35 && !isButtonSlot(event.getSlot())) {
+            ItemStack clicked = event.getCurrentItem();
+            if (clicked == null || clicked.getType() == Material.AIR || isButton(clicked)) return;
+            event.setCancelled(true);
+            int from = event.getSlot();
+            if (event.isRightClick()) {                          // -> main hand (slot 0)
+                if (from != 0) {
+                    ItemStack cur0 = p.getInventory().getItem(0);
+                    p.getInventory().setItem(0, clicked);
+                    p.getInventory().setItem(from, cur0);
+                }
+                p.getInventory().setHeldItemSlot(0);
+            } else if (event.isLeftClick()) {                    // -> offhand
+                ItemStack off = p.getInventory().getItemInOffHand();
+                p.getInventory().setItemInOffHand(clicked);
+                p.getInventory().setItem(from, off);
+            }
+            p.updateInventory();
+        }
     }
 
     @EventHandler
@@ -156,6 +186,7 @@ public final class SettingsMenu implements Listener {
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player p)) return;
         ensure(p, SETTINGS_SLOT, "settings"); ensure(p, GUNSTATS_SLOT, "gunstats"); ensure(p, PLAYERLIST_SLOT, "playerlist");
+        org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> clearCursorButton(p));   // never leave a button on the cursor
     }
 
     private void ensure(Player p, int slot, String type) {

@@ -150,27 +150,31 @@ public final class SettingsMenu implements Listener {
         if (isButton(event.getCurrentItem()) || isButton(event.getCursor())) { event.setCancelled(true); return; }
         if (event.getClick() == ClickType.NUMBER_KEY && ownInv && isButtonSlot(event.getSlot())) { event.setCancelled(true); return; }
 
-        // SCP:CB-style inventory: clicking an item in your own survival inventory EQUIPS it instead of
-        // dragging it to the cursor. Right-click -> main hand, left-click -> offhand. (Creative is left
-        // alone so builders can arrange items normally.)
-        if (ownInv && p.getGameMode() != org.bukkit.GameMode.CREATIVE
+        // SCP:CB-style EQUIP gesture, kept deliberately narrow so it never gets in the way of normal
+        // inventory management: LEFT-click, drag, shift-click and number keys are all 100% vanilla, so
+        // you move/sort items exactly as usual. Only:
+        //   - RIGHT-click an item  -> equip it to your MAIN HAND (and select that slot)
+        //   - SHIFT + RIGHT-click  -> equip it to your OFF HAND
+        // (Creative is left alone so builders can arrange items normally.)
+        if (ownInv && event.isRightClick() && p.getGameMode() != org.bukkit.GameMode.CREATIVE
+            && event.getCursor().getType() == Material.AIR                  // not while carrying something
             && p.getOpenInventory().getTopInventory().getType() == org.bukkit.event.inventory.InventoryType.CRAFTING
             && event.getSlot() >= 0 && event.getSlot() <= 35 && !isButtonSlot(event.getSlot())) {
             ItemStack clicked = event.getCurrentItem();
             if (clicked == null || clicked.getType() == Material.AIR || isButton(clicked)) return;
             event.setCancelled(true);
             int from = event.getSlot();
-            if (event.isRightClick()) {                          // -> main hand (slot 0)
+            if (event.isShiftClick()) {                          // shift+right -> off hand
+                ItemStack off = p.getInventory().getItemInOffHand();
+                p.getInventory().setItemInOffHand(clicked);
+                p.getInventory().setItem(from, off);
+            } else {                                             // right -> main hand (slot 0)
                 if (from != 0) {
                     ItemStack cur0 = p.getInventory().getItem(0);
                     p.getInventory().setItem(0, clicked);
                     p.getInventory().setItem(from, cur0);
                 }
                 p.getInventory().setHeldItemSlot(0);
-            } else if (event.isLeftClick()) {                    // -> offhand
-                ItemStack off = p.getInventory().getItemInOffHand();
-                p.getInventory().setItemInOffHand(clicked);
-                p.getInventory().setItem(from, off);
             }
             p.updateInventory();
         }

@@ -127,6 +127,26 @@ public final class SettingsMenu implements Listener {
     public void onClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player p)) return;
 
+        // (0) UI BUTTONS are handled FIRST, in EVERY context. A button can never be picked up, and
+        //     clicking one always opens its menu - even while you're already inside another menu. (The
+        //     holder checks below used to run first and 'return', so a button clicked from the lower
+        //     inventory while a menu was open did nothing AND stuck to the cursor - that's the bug.)
+        //     The menu is opened on the next tick so it never races the current click event, and any
+        //     stray button on the cursor is cleared.
+        ItemStack cur = event.getCurrentItem();
+        boolean cursorIsButton = isButton(event.getCursor());
+        if (isButton(cur) || cursorIsButton) {
+            event.setCancelled(true);
+            if (isButton(cur) && !cursorIsButton
+                && event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory())) {
+                String type = cur.getItemMeta().getPersistentDataContainer()
+                    .getOrDefault(typeKey, PersistentDataType.STRING, "settings");
+                Bukkit.getScheduler().runTask(plugin, () -> openByType(p, type));
+            }
+            Bukkit.getScheduler().runTask(plugin, () -> clearCursorButton(p));
+            return;
+        }
+
         InventoryHolder holder = event.getInventory().getHolder();
         if (holder instanceof SettingsHolder) {
             event.setCancelled(true);
@@ -136,18 +156,6 @@ public final class SettingsMenu implements Listener {
         if (holder instanceof IndexHolder || holder instanceof PlayerlistHolder) { event.setCancelled(true); return; }
 
         boolean ownInv = event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory());
-        if (ownInv && isButtonSlot(event.getSlot()) && isButton(event.getCurrentItem())) {
-            event.setCancelled(true);
-            String type = event.getCurrentItem().getItemMeta().getPersistentDataContainer()
-                .getOrDefault(typeKey, PersistentDataType.STRING, "settings");
-            switch (type) {
-                case "gunstats" -> openIndex(p);
-                case "playerlist" -> openPlayerlist(p);
-                default -> openSettings(p);
-            }
-            return;
-        }
-        if (isButton(event.getCurrentItem()) || isButton(event.getCursor())) { event.setCancelled(true); return; }
         if (event.getClick() == ClickType.NUMBER_KEY && ownInv && isButtonSlot(event.getSlot())) { event.setCancelled(true); return; }
 
         // SCP:CB-style EQUIP gesture, kept deliberately narrow so it never gets in the way of normal
@@ -207,6 +215,14 @@ public final class SettingsMenu implements Listener {
     }
 
     // ---------------------------------------------------------------- Settings GUI
+
+    private void openByType(Player p, String type) {
+        switch (type) {
+            case "gunstats" -> openIndex(p);
+            case "playerlist" -> openPlayerlist(p);
+            default -> openSettings(p);
+        }
+    }
 
     public void openSettings(Player p) {
         Inventory inv = frame(new SettingsHolder(), "Settings");

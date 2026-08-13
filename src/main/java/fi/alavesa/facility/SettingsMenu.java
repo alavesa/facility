@@ -61,6 +61,12 @@ public final class SettingsMenu implements Listener {
         this.buttonKey = new NamespacedKey(plugin, "ui_button");
         this.typeKey = new NamespacedKey(plugin, "ui_type");
         this.unlocksKey = new NamespacedKey(plugin, "unlocks");
+        // Bulletproof fix for "the settings button sticks to the cursor": opening your OWN inventory
+        // (pressing E) does NOT fire InventoryOpenEvent, so clearing on open never ran. A light sweep
+        // clears any UI button left on any player's cursor, whatever put it there.
+        plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+            for (Player p : plugin.getServer().getOnlinePlayers()) clearCursorButton(p);
+        }, 20L, 3L);
     }
 
     public static String soundQuality(Player p) {

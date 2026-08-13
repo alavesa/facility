@@ -46,6 +46,7 @@ public final class SettingsMenu implements Listener {
     public static final NamespacedKey SOUND_KEY = new NamespacedKey("scp", "sound_quality");
     private static final NamespacedKey GUNS_ID = new NamespacedKey("guns", "id");
     private static final NamespacedKey GUNS_ATT_ID = new NamespacedKey("guns", "attachment_id");
+    private static final NamespacedKey GUNS_GUN_ATTACHMENTS = new NamespacedKey("guns", "gun_attachments"); // CSV on a gun
 
     private static final int SETTINGS_SLOT = 17, GUNSTATS_SLOT = 16, PLAYERLIST_SLOT = 15;
     private static final int SOUND_SLOT = 11;
@@ -55,12 +56,14 @@ public final class SettingsMenu implements Listener {
     private final NamespacedKey buttonKey;   // BYTE: marks a UI button
     private final NamespacedKey typeKey;     // STRING: which button
     private final NamespacedKey unlocksKey;  // STRING: serialized unlocked gun/attachment index
+    private final NamespacedKey attEntryKey; // STRING: attachment id carried by a Gun-Stats GUI entry
 
     public SettingsMenu(FacilityPlugin plugin) {
         this.plugin = plugin;
         this.buttonKey = new NamespacedKey(plugin, "ui_button");
         this.typeKey = new NamespacedKey(plugin, "ui_type");
         this.unlocksKey = new NamespacedKey(plugin, "unlocks");
+        this.attEntryKey = new NamespacedKey(plugin, "att_entry");   // attachment id on a Gun-Stats entry
         // Bulletproof fix for "the settings button sticks to the cursor": opening your OWN inventory
         // (pressing E) does NOT fire InventoryOpenEvent, so clearing on open never ran. A light sweep
         // clears any UI button left on any player's cursor, whatever put it there.
@@ -93,9 +96,11 @@ public final class SettingsMenu implements Listener {
         if (event.getPlayer() instanceof Player p) { scanUnlocks(p); clearCursorButton(p); }
     }
 
-    /** A UI button must never end up stuck on the cursor (the "settings icon on the mouse-tip" bug). */
+    /** Clear a UI button that is actually on the SERVER cursor (only then re-sync, so the 3-tick sweep
+     *  doesn't spam updateInventory to everyone). The client-only "ghost" from a cancelled pickup is
+     *  handled separately, per-click, in onClick. */
     private void clearCursorButton(Player p) {
-        if (isButton(p.getItemOnCursor())) p.setItemOnCursor(null);
+        if (isButton(p.getItemOnCursor())) { p.setItemOnCursor(null); p.updateInventory(); }
     }
 
     @EventHandler public void onPickup(EntityPickupItemEvent event) {
@@ -143,13 +148,16 @@ public final class SettingsMenu implements Listener {
         boolean cursorIsButton = isButton(event.getCursor());
         if (isButton(cur) || cursorIsButton) {
             event.setCancelled(true);
+            event.setCursor(null);                 // never let the click leave a button on the cursor
             if (isButton(cur) && !cursorIsButton
                 && event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory())) {
                 String type = cur.getItemMeta().getPersistentDataContainer()
                     .getOrDefault(typeKey, PersistentDataType.STRING, "settings");
                 Bukkit.getScheduler().runTask(plugin, () -> openByType(p, type));
             }
-            Bukkit.getScheduler().runTask(plugin, () -> clearCursorButton(p));
+            // The client already drew the button on the cursor even though the server cancelled it -
+            // re-sync next tick so that ghost is wiped.
+            Bukkit.getScheduler().runTask(plugin, () -> { clearCursorButton(p); p.updateInventory(); });
             return;
         }
 
@@ -159,7 +167,15 @@ public final class SettingsMenu implements Listener {
             if (event.getRawSlot() == SOUND_SLOT) toggleSound(p);
             return;
         }
-        if (holder instanceof IndexHolder || holder instanceof PlayerlistHolder) { event.setCancelled(true); return; }
+        if (holder instanceof IndexHolder) {
+            event.setCancelled(true);
+            ItemStack clicked = event.getCurrentItem();
+            String attId = clicked == null || !clicked.hasItemMeta() ? null
+                : clicked.getItemMeta().getPersistentDataContainer().get(attEntryKey, PersistentDataType.STRING);
+            if (attId != null) toggleAttachment(p, attId);   // add/remove on the held gun via the Guns command
+            return;
+        }
+        if (holder instanceof PlayerlistHolder) { event.setCancelled(true); return; }
 
         boolean ownInv = event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory());
         if (event.getClick() == ClickType.NUMBER_KEY && ownInv && isButtonSlot(event.getSlot())) { event.setCancelled(true); return; }
@@ -294,20 +310,60 @@ public final class SettingsMenu implements Listener {
         if (changed) pdc.set(unlocksKey, PersistentDataType.STRING, sb.toString());
     }
 
+    /** Attachment ids currently on the player's held gun (read straight off the Guns CSV tag). */
+    private Set<String> heldGunAttachments(Player p) {
+        ItemStack held = p.getInventory().getItemInMainHand();
+        if (held == null || !held.hasItemMeta()) return java.util.Collections.emptySet();
+        String csv = held.getItemMeta().getPersistentDataContainer()
+            .getOrDefault(GUNS_GUN_ATTACHMENTS, PersistentDataType.STRING, "");
+        if (csv.isEmpty()) return java.util.Collections.emptySet();
+        return new LinkedHashSet<>(java.util.Arrays.asList(csv.split(",")));
+    }
+    private boolean holdingGun(Player p) {
+        ItemStack held = p.getInventory().getItemInMainHand();
+        return held != null && held.hasItemMeta()
+            && held.getItemMeta().getPersistentDataContainer().has(GUNS_ID, PersistentDataType.STRING);
+    }
+
+    /** Add or remove an attachment on the held gun by reusing the Guns plugin's /guns attach|detach
+     *  command (which owns the attachment logic + model refresh), then refresh the index view. */
+    private void toggleAttachment(Player p, String attId) {
+        if (!holdingGun(p)) { p.sendMessage(Component.text("Hold a gun to fit attachments.", NamedTextColor.RED)); return; }
+        boolean fitted = heldGunAttachments(p).contains(attId.toLowerCase());
+        p.performCommand("guns " + (fitted ? "detach " : "attach ") + attId);
+        p.playSound(p.getLocation(), org.bukkit.Sound.BLOCK_PISTON_CONTRACT, 0.6f, fitted ? 0.8f : 1.4f);
+        Bukkit.getScheduler().runTask(plugin, () -> { if (p.isOnline()) openIndex(p); });
+    }
+
     public void openIndex(Player p) {
         Inventory inv = frame(new IndexHolder(), "Gun Stats — Index");
+        boolean gun = holdingGun(p);
+        Set<String> onGun = heldGunAttachments(p);
         String raw = p.getPersistentDataContainer().getOrDefault(unlocksKey, PersistentDataType.STRING, "");
         int slot = 10;
         if (!raw.isEmpty()) for (String rec : raw.split(String.valueOf(RS))) {
             String[] f = rec.split(String.valueOf(FS), -1);
             if (f.length < 5) continue;
+            boolean isAtt = f[1].equals("attachment");
+            boolean fitted = isAtt && onGun.contains(f[0].toLowerCase());
             Material mat;
             try { mat = Material.valueOf(f[2]); } catch (IllegalArgumentException e) { mat = Material.PAPER; }
             ItemStack entry = new ItemStack(mat);
             ItemMeta meta = entry.getItemMeta();
             meta.itemName(Component.text(f[4].isEmpty() ? f[0] : f[4],
                 f[1].equals("gun") ? NamedTextColor.GOLD : NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
-            meta.lore(List.of(Component.text(f[1].equals("gun") ? "Gun" : "Attachment", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+            List<Component> lore = new ArrayList<>();
+            lore.add(Component.text(isAtt ? "Attachment" : "Gun", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+            if (isAtt) {
+                lore.add(Component.text(!gun ? "Hold a gun to fit this"
+                        : fitted ? "✔ Fitted — click to remove" : "Click to attach to your gun",
+                    !gun ? NamedTextColor.DARK_GRAY : fitted ? NamedTextColor.GREEN : NamedTextColor.YELLOW)
+                    .decoration(TextDecoration.ITALIC, false));
+                meta.getPersistentDataContainer().set(attEntryKey, PersistentDataType.STRING, f[0].toLowerCase());
+                if (fitted) meta.addEnchant(org.bukkit.enchantments.Enchantment.UNBREAKING, 1, true);
+                meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ENCHANTS);
+            }
+            meta.lore(lore);
             if (!f[3].isEmpty()) setModel(meta, f[3]);
             entry.setItemMeta(meta);
             while (slot < 44 && (slot % 9 == 0 || slot % 9 == 8)) slot++;   // keep off the border
@@ -315,6 +371,8 @@ public final class SettingsMenu implements Listener {
             inv.setItem(slot++, entry);
         }
         if (slot == 10) inv.setItem(22, named(Material.BARRIER, "Nothing unlocked yet — pick up a gun."));
+        inv.setItem(49, named(Material.PAPER, gun ? "Attachments apply to the gun in your hand"
+            : "Hold a gun, then click an attachment to fit/remove it"));
         p.openInventory(inv);
         p.playSound(p.getLocation(), org.bukkit.Sound.ITEM_BOOK_PAGE_TURN, 0.7f, 1.2f);
     }

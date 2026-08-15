@@ -109,9 +109,25 @@ public final class SettingsMenu implements Listener {
     }
 
     private void giveButtons(Player p) {
-        p.getInventory().setItem(SETTINGS_SLOT, button("settings", Material.COMPARATOR, "⚙ Settings", "ui_settings", "Open settings."));
-        p.getInventory().setItem(GUNSTATS_SLOT, button("gunstats", Material.BOOK, "🔫 Gun Stats", "ui_gunstats", "Guns & attachments you've unlocked."));
-        p.getInventory().setItem(PLAYERLIST_SLOT, button("playerlist", Material.NAME_TAG, "👥 Player List", "ui_playerlist", "Who's online + their ping."));
+        placeButton(p, SETTINGS_SLOT, button("settings", Material.COMPARATOR, "⚙ Settings", "ui_settings", "Open settings."));
+        placeButton(p, GUNSTATS_SLOT, button("gunstats", Material.BOOK, "🔫 Gun Stats", "ui_gunstats", "Guns & attachments you've unlocked."));
+        placeButton(p, PLAYERLIST_SLOT, button("playerlist", Material.NAME_TAG, "👥 Player List", "ui_playerlist", "Who's online + their ping."));
+    }
+
+    /** Place a button WITHOUT ever destroying a player's item. If the slot holds a real item we relocate
+     *  it first and only claim the slot if it fully moved; if the inventory is full we keep the item and
+     *  skip the button. (The old code overwrote the slot outright, which deleted items - the "items
+     *  disappear from the inventory" bug.) */
+    private void placeButton(Player p, int slot, ItemStack btn) {
+        ItemStack at = p.getInventory().getItem(slot);
+        if (isButton(at)) { p.getInventory().setItem(slot, btn); return; }   // refresh an existing button
+        if (at != null && at.getType() != Material.AIR) {
+            var leftover = p.getInventory().addItem(at.clone());             // move the player's item elsewhere
+            if (!leftover.isEmpty()) return;                                 // inventory full -> keep item, no button
+            p.getInventory().setItem(slot, btn);
+        } else {
+            p.getInventory().setItem(slot, btn);                            // slot was empty
+        }
     }
 
     private ItemStack button(String type, Material mat, String name, String model, String lore) {
@@ -219,16 +235,8 @@ public final class SettingsMenu implements Listener {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player p)) return;
-        ensure(p, SETTINGS_SLOT, "settings"); ensure(p, GUNSTATS_SLOT, "gunstats"); ensure(p, PLAYERLIST_SLOT, "playerlist");
+        giveButtons(p);   // non-destructive: re-places only missing buttons, never deletes items
         org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> clearCursorButton(p));   // never leave a button on the cursor
-    }
-
-    private void ensure(Player p, int slot, String type) {
-        ItemStack at = p.getInventory().getItem(slot);
-        if (!isButton(at)) {
-            if (at != null && at.getType() != Material.AIR) p.getInventory().addItem(at);
-            giveButtons(p);
-        }
     }
 
     @EventHandler
@@ -383,7 +391,7 @@ public final class SettingsMenu implements Listener {
         var online = new ArrayList<>(Bukkit.getOnlinePlayers());
         int rows = Math.max(1, Math.min(6, (online.size() + 8) / 9));
         Inventory inv = Bukkit.createInventory(new PlayerlistHolder(), rows * 9,
-            Component.text("Online — " + online.size(), NamedTextColor.DARK_AQUA));
+            guiTitle("Online — " + online.size()));
         int slot = 0;
         for (Player pl : online) {
             if (slot >= inv.getSize()) break;
@@ -404,10 +412,21 @@ public final class SettingsMenu implements Listener {
     // ---------------------------------------------------------------- helpers
 
     private Inventory frame(InventoryHolder holder, String title) {
-        Inventory inv = Bukkit.createInventory(holder, 27, Component.text(title, NamedTextColor.DARK_AQUA));
+        Inventory inv = Bukkit.createInventory(holder, 27, guiTitle(title));
         ItemStack pane = named(Material.GRAY_STAINED_GLASS_PANE, " ");
         for (int i = 0; i < inv.getSize(); i++) inv.setItem(i, pane);
         return inv;
+    }
+
+    /** GUI title, optionally prefixed with a custom-font background glyph so the menu can be given a
+     *  custom TEXTURE via a resource pack (set gui.font + gui.background-glyph in config.yml, e.g. a
+     *  negative-space glyph that draws the panel behind the title). Plain text if not configured. */
+    private Component guiTitle(String text) {
+        String font = plugin.getConfig().getString("gui.font", "");
+        String glyph = plugin.getConfig().getString("gui.background-glyph", "");
+        Component label = Component.text(text, NamedTextColor.DARK_AQUA);
+        if (font.isEmpty() || glyph.isEmpty()) return label;
+        return Component.text(glyph).font(net.kyori.adventure.key.Key.key(font)).append(label);
     }
 
     private ItemStack named(Material mat, String name) {

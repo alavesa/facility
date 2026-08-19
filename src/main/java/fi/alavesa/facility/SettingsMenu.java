@@ -162,18 +162,24 @@ public final class SettingsMenu implements Listener {
         //     stray button on the cursor is cleared.
         ItemStack cur = event.getCurrentItem();
         boolean cursorIsButton = isButton(event.getCursor());
-        if (isButton(cur) || cursorIsButton) {
+        boolean clickedOwnInv = event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory());
+        // Treat a click as a BUTTON click if the item is a button OR the slot is a button slot in the
+        // player's own inventory - so the tile always opens its menu and the item can never be dragged off it.
+        boolean slotIsButton = clickedOwnInv && isButtonSlot(event.getSlot());
+        if (isButton(cur) || cursorIsButton || slotIsButton) {
             event.setCancelled(true);
+            event.setResult(org.bukkit.event.Event.Result.DENY);
             event.setCursor(null);                 // never let the click leave a button on the cursor
-            if (isButton(cur) && !cursorIsButton
-                && event.getClickedInventory() != null && event.getClickedInventory().equals(p.getInventory())) {
-                String type = cur.getItemMeta().getPersistentDataContainer()
-                    .getOrDefault(typeKey, PersistentDataType.STRING, "settings");
-                Bukkit.getScheduler().runTask(plugin, () -> openByType(p, type));
+            p.updateInventory();                   // re-sync THIS tick so the client's predicted pickup is undone at once
+            if ((isButton(cur) || slotIsButton) && !cursorIsButton && clickedOwnInv) {
+                ItemStack tile = isButton(cur) ? cur : p.getInventory().getItem(event.getSlot());
+                String type = tile != null && tile.hasItemMeta()
+                    ? tile.getItemMeta().getPersistentDataContainer().getOrDefault(typeKey, PersistentDataType.STRING, "settings")
+                    : (event.getSlot() == GUNSTATS_SLOT ? "gunstats" : event.getSlot() == PLAYERLIST_SLOT ? "playerlist" : "settings");
+                Bukkit.getScheduler().runTask(plugin, () -> openByType(p, type));   // opening a new view wipes any ghost
+            } else {
+                Bukkit.getScheduler().runTask(plugin, () -> { clearCursorButton(p); p.updateInventory(); });
             }
-            // The client already drew the button on the cursor even though the server cancelled it -
-            // re-sync next tick so that ghost is wiped.
-            Bukkit.getScheduler().runTask(plugin, () -> { clearCursorButton(p); p.updateInventory(); });
             return;
         }
 

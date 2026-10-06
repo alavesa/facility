@@ -77,7 +77,7 @@ public final class FacilityPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new StatsListener(store), this);
         stashes = new StashManager(this);
         getServer().getPluginManager().registerEvents(stashes, this);
-        getServer().getPluginManager().registerEvents(new SettingsMenu(this), this);
+        getServer().getPluginManager().registerEvents(new UiCleanup(this), this);   // inventory UI menus removed (0.18.0)
         getServer().getPluginManager().registerEvents(new BreakableManager(this, areas), this);
         snav = new SNavManager(this);
         snav.init();

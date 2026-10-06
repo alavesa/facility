@@ -68,7 +68,7 @@ public final class SettingsMenu implements Listener {
         // (pressing E) does NOT fire InventoryOpenEvent, so clearing on open never ran. A light sweep
         // clears any UI button left on any player's cursor, whatever put it there.
         plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
-            for (Player p : plugin.getServer().getOnlinePlayers()) clearCursorButton(p);
+            for (Player p : plugin.getServer().getOnlinePlayers()) { clearCursorButton(p); purgeButtons(p); }
         }, 20L, 3L);
     }
 
@@ -84,12 +84,20 @@ public final class SettingsMenu implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player p = event.getPlayer();
         p.undiscoverRecipes(new ArrayList<>(p.getDiscoveredRecipes()));
-        giveButtons(p);
+        purgeButtons(p);   // hotbar UI buttons removed - clear any a player still carries
         scanUnlocks(p);
     }
 
     @EventHandler public void onRespawn(PlayerRespawnEvent event) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> giveButtons(event.getPlayer()), 2L);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> purgeButtons(event.getPlayer()), 2L);
+    }
+
+    /** The hotbar Settings/Gun-Stats/Player-List buttons were removed. Strip any left in an inventory. */
+    private void purgeButtons(Player p) {
+        ItemStack[] contents = p.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            if (isButton(contents[i])) p.getInventory().setItem(i, null);
+        }
     }
 
     @EventHandler public void onOpen(InventoryOpenEvent event) {
@@ -214,7 +222,7 @@ public final class SettingsMenu implements Listener {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player p)) return;
-        giveButtons(p);   // non-destructive: re-places only missing buttons, never deletes items
+        purgeButtons(p);   // buttons removed - strip any, don't re-place
         org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> clearCursorButton(p));   // never leave a button on the cursor
     }
 

@@ -166,6 +166,15 @@ public final class PlayerStore {
         write(id, cfg);
     }
 
+    /** How many times they have pressed PLAY and entered the world. */
+    public int deploys(UUID id) { return read(id).getInt("stats.deploys", 0); }
+
+    public void addDeploy(UUID id) {
+        YamlConfiguration cfg = read(id);
+        cfg.set("stats.deploys", cfg.getInt("stats.deploys", 0) + 1);
+        write(id, cfg);
+    }
+
     /** Kill/death ratio (deaths treated as at least 1 so a clean sheet still reads sensibly). */
     public double kd(UUID id) {
         int k = kills(id), d = deaths(id);

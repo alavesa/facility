@@ -51,7 +51,8 @@ public final class TeamManager {
                 if (icon == null) icon = Material.PAPER;
                 String prefix = sec.getString("prefix", "");
                 List<String> perms = sec.getStringList("permissions");
-                teams.put(key, new Team(key, display, priv, rank, icon, prefix, perms));
+                teams.put(key, new Team(key, display, priv, rank, icon, prefix, perms,
+                    sec.getString("description", ""), sec.getStringList("perks")));
             }
         }
         syncGroups();

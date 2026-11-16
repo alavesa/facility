@@ -12,10 +12,12 @@ import java.util.List;
  * team's LuckPerms group ({@code rank}), and that group is (re)configured with
  * the team's chat {@code prefix} and its {@code permissions} - so a team confers
  * a rank, a prefix, and a permission set (see {@link TeamManager#applyRank}).
- * {@code icon} is what the selector paints.
+ * {@code icon} is what the selector paints; {@code description} and {@code
+ * perks} are the team's card in the selector (text only - they grant nothing).
  */
 public record Team(String id, String display, boolean privateTeam, String rank,
-                   Material icon, String prefix, List<String> permissions) {
+                   Material icon, String prefix, List<String> permissions,
+                   String description, List<String> perks) {
 
     public Material iconOr(Material fallback) {
         return icon != null ? icon : fallback;

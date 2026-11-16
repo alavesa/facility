@@ -1,8 +1,5 @@
 package fi.alavesa.facility;
 
-import net.kyori.adventure.key.Key;
-import net.kyori.adventure.sound.Sound;
-import net.kyori.adventure.sound.SoundStop;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -33,7 +30,8 @@ import java.util.UUID;
  * world proper. If they had a pending combat-log death we float a hologram of
  * it in front of them once they land.
  *
- * The menu is drawn by {@link DialogMenu} (native /dialog). The ONLY time a
+ * The menu is drawn by {@link DialogMenu} (native /dialog); its look, music
+ * and transitions are {@link MenuAudioAndVisualPacketHandler}'s. The ONLY time a
  * player is thrown to the menu automatically is on rejoin. Death/respawn never
  * locks them (see {@link #onRespawn}); {@code /menu} lets them return by hand -
  * but re-entry by hand requires a 10-second STAND-STILL hold first (config
@@ -51,6 +49,7 @@ public final class LobbyManager implements Listener {
     private final DialogMenu dialogMenu;
     private final TeamManager teams;
     private final CombatLogListener combat;
+    private final MenuAudioAndVisualPacketHandler fx;
 
     /** Players who have Continued this session and shouldn't be re-locked. */
     private final Set<UUID> continued = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
@@ -58,8 +57,8 @@ public final class LobbyManager implements Listener {
     /** In-flight re-entry stand-still holds (from /menu), keyed by player. */
     private final Map<UUID, BukkitTask> reentryHolds = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Looping main-menu music tasks, keyed by player (one per player in menu). */
-    private final Map<UUID, BukkitTask> musicTasks = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Players who pressed PLAY and are watching the out-transition (not in the world yet). */
+    private final Set<UUID> deploying = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     /** Players who joined and still need the menu (until they press PLAY). */
     private final Set<UUID> pendingMenu = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
@@ -80,12 +79,13 @@ public final class LobbyManager implements Listener {
     private static final NamespacedKey CCTV_BACK = new NamespacedKey("terminal", "cctv_back");
 
     public LobbyManager(FacilityPlugin plugin, PlayerStore store, DialogMenu dialogMenu,
-                        TeamManager teams, CombatLogListener combat) {
+                        TeamManager teams, CombatLogListener combat, MenuAudioAndVisualPacketHandler fx) {
         this.plugin = plugin;
         this.store = store;
         this.dialogMenu = dialogMenu;
         this.teams = teams;
         this.combat = combat;
+        this.fx = fx;
     }
 
     // --- join / quit --------------------------------------------------------
@@ -131,7 +131,7 @@ public final class LobbyManager implements Listener {
         UUID id = player.getUniqueId();
         if (!player.isOnline() || continued.contains(id)) return;
         pendingMenu.add(id);
-        startMusic(player);
+        fx.enter(player);   // music + monitor look; no-op if they're already in the menu
         scheduleShow(player, 1L, true);     // next tick - near-instant, no 1s delay
         scheduleShow(player, 20L, false);   // backups for a client that wasn't ready / dropped packet
         scheduleShow(player, 45L, false);
@@ -151,7 +151,7 @@ public final class LobbyManager implements Listener {
                 if (vantage != null) player.teleport(vantage);
             }
             openMainMenu(player);
-            startMusic(player);   // ambient plays while they sit in the menu (idempotent)
+            fx.enter(player);   // idempotent
         }, delayTicks);
     }
 
@@ -168,13 +168,15 @@ public final class LobbyManager implements Listener {
      */
     public void menuInteracted(Player player) {
         pendingMenu.remove(player.getUniqueId());
+        fx.navigate(player);   // click + static burst between dialogs
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         cancelReentry(player, null);
-        stopMusic(player);
+        fx.leave(player);   // also drops a PLAY transition in flight - they rejoin into the menu
+        deploying.remove(player.getUniqueId());
         pendingMenu.remove(player.getUniqueId());
         deadPendingSpawn.remove(player.getUniqueId());
         // Only snapshot a real, in-world position - never the menu lock itself,
@@ -238,54 +240,7 @@ public final class LobbyManager implements Listener {
         Location vantage = lobbyVantage(player);
         if (vantage != null) player.teleport(vantage);
         openMainMenu(player);
-        startMusic(player);
-    }
-
-    // --- main-menu music ----------------------------------------------------
-
-    /**
-     * Play the configured menu track now and loop it every
-     * {@code menu.music.interval-minutes} while the player is still in the menu.
-     * {@code menu.music.sound} is any sound key - a vanilla one or a custom one
-     * added to the resource pack. No-op / cheap if disabled.
-     */
-    private void startMusic(Player player) {
-        if (musicTasks.containsKey(player.getUniqueId())) return;   // already looping - idempotent
-        if (!plugin.getConfig().getBoolean("menu.music.enabled", true)) return;
-        String soundName = plugin.getConfig().getString("menu.music.sound", "").trim();
-        if (soundName.isEmpty()) return;
-        final Key key;
-        try { key = Key.key(soundName); } catch (Exception invalid) {
-            plugin.getLogger().warning("menu.music.sound '" + soundName + "' is not a valid sound key.");
-            return;
-        }
-        float volume = (float) plugin.getConfig().getDouble("menu.music.volume", 1.0);
-        float pitch = (float) plugin.getConfig().getDouble("menu.music.pitch", 1.0);
-        double minutes = Math.max(0.05, plugin.getConfig().getDouble("menu.music.interval-minutes", 3.0));
-        long periodTicks = Math.max(20L, (long) (minutes * 60.0 * 20.0));
-        Sound sound = Sound.sound(key, Sound.Source.MUSIC, volume, pitch);
-
-        player.playSound(sound);   // immediately
-        BukkitTask task = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
-            // Still online AND still in the menu? Otherwise stop the loop.
-            if (!player.isOnline() || continued.contains(player.getUniqueId())
-                || player.getGameMode() != GameMode.SPECTATOR) {
-                stopMusic(player);
-                return;
-            }
-            player.playSound(sound);
-        }, periodTicks, periodTicks);
-        musicTasks.put(player.getUniqueId(), task);
-    }
-
-    /** Stop the menu music loop and silence the current track. */
-    private void stopMusic(Player player) {
-        BukkitTask task = musicTasks.remove(player.getUniqueId());
-        if (task != null) task.cancel();
-        String soundName = plugin.getConfig().getString("menu.music.sound", "").trim();
-        if (!soundName.isEmpty() && player.isOnline()) {
-            try { player.stopSound(SoundStop.named(Key.key(soundName))); } catch (Exception ignored) { }
-        }
+        fx.enter(player);
     }
 
     /** Open the custom main menu (a native /dialog GUI). The dialog itself is
@@ -301,7 +256,9 @@ public final class LobbyManager implements Listener {
      *  player who has not Continued this session is, by definition, sitting in the menu. */
     public void menuFlagTick() {
         for (Player p : plugin.getServer().getOnlinePlayers()) {
-            setMenuFlag(p, !continued.contains(p.getUniqueId()));
+            boolean inWorld = continued.contains(p.getUniqueId());
+            setMenuFlag(p, !inWorld);
+            if (inWorld) fx.ensureLeft(p);   // same idea for the menu look + music
         }
     }
 
@@ -456,15 +413,29 @@ public final class LobbyManager implements Listener {
         }
     }
 
-    /** Actually deploy the player to a chosen location and leave the menu. */
+    /**
+     * Deploy the player to a chosen location and leave the menu. The menu's
+     * out-transition plays first (static, monitor powers off); the actual
+     * hand-over to the world - {@link #arrive} - happens while the screen is
+     * black. With transitions off it happens right away.
+     */
     public void continueTo(Player player, Location dest) {
+        UUID id = player.getUniqueId();
+        if (!deploying.add(id)) return;   // PLAY again while the transition is still running
         cancelReentry(player, null);
-        pendingMenu.remove(player.getUniqueId());
-        stopMusic(player);
-        setMenuFlag(player, false);   // credits HUD can draw again once they deploy
-        player.clearTitle();   // remove the menu-background subtitle before they deploy
-        continued.add(player.getUniqueId());
+        pendingMenu.remove(id);   // no join re-send may reopen the dialog over the transition
+        player.clearTitle();      // remove the menu-background subtitle before they deploy
         player.closeInventory();
+        fx.deploy(player, () -> {
+            deploying.remove(id);
+            arrive(player, dest);
+        });
+    }
+
+    /** The moment the player actually enters the world. */
+    private void arrive(Player player, Location dest) {
+        setMenuFlag(player, false);   // credits HUD can draw again once they deploy
+        continued.add(player.getUniqueId());
         player.setGameMode(store.lastGameMode(player.getUniqueId()));
         // Hand over the team's starter kit if this deploy follows a team-join or a respawn.
         if (kitPending.remove(player.getUniqueId())) {
@@ -472,7 +443,12 @@ public final class LobbyManager implements Listener {
         }
         if (dest == null) dest = player.getWorld().getSpawnLocation();
         player.teleport(dest);
-        player.sendMessage(Component.text("Welcome to Site-19. Stay sharp.", NamedTextColor.AQUA));
+        store.addDeploy(player.getUniqueId());
+        String welcome = plugin.getConfig().getString("menu.text.deploy-message", "");
+        if (!welcome.isBlank()) {
+            player.sendMessage(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+                .legacyAmpersand().deserialize(welcome));
+        }
         store.clearPendingCombatDeath(player.getUniqueId());
     }
 

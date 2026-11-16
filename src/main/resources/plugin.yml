@@ -9,7 +9,7 @@ softdepend: [LuckPerms, Labra, Terminal]
 commands:
   facility:
     description: Lobby menu, team selection, and admin team management
-    usage: /facility <continue|teams|team|grant|revoke|reload>
+    usage: /facility <continue|teams|team|stats|credits|grant|revoke|reload|menu>
     aliases: [fac]
   menu:
     description: Return to the SITE-19 main menu

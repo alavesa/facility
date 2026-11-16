@@ -16,45 +16,166 @@ lobby:
 combat:
   seconds: 15
 
-# The MAIN menu dialog, operator-editable at runtime.
+# =============================================================================
+# THE MAIN MENU
+# =============================================================================
+# A native Minecraft dialog shown on join / respawn / /menu, over the lobby
+# vantage above. Everything under `menu` is re-read by /facility reload; bad
+# values are reported in the console and replaced with the defaults.
+#
 #   reentry-seconds - how long a player must STAND STILL (no block move, no
 #                     damage) after /menu before the menu reopens. The initial
 #                     join-lock still opens the menu immediately; only manual
 #                     re-entry uses this hold. Default 10.
-#   elements        - the ordered contents of the main dialog. Each element is
-#                     one of:
-#                       {type: button, label: "<&-coloured>", action: "<command>"}
-#                       {type: text,   label: "<&-coloured>"}
-#                     A button runs its command (no leading slash) on click; a
-#                     text element is a body line. Edit with /facility menu ...
-#                     or the chest GUI editor (/facility menu edit).
-#   music           - a sound played while a player sits in the main menu, and
-#                     re-played every `interval-minutes`. `sound` is any sound
-#                     key (a vanilla one, or a custom one you add to the resource
-#                     pack, e.g. facility:menu_theme). Stops on PLAY / leaving.
 menu:
   reentry-seconds: 10
-  # background - the custom resource-pack panel behind the dialog. Default OFF:
-  # the menu worked before the background was added, and the background glyph is
-  # the prime suspect for it failing to render, so we ship the plain (known-good)
-  # dialog. Set to true to try the custom panel once its positioning is dialled in.
-  background:
-    # The custom main-menu background, shown as a full custom-textured SUBTITLE
-    # behind the dialog (not an in-dialog element any more). Set false to hide it.
-    enabled: true
-  music:
-    enabled: true
-    # The custom Site-19 ambient drone, shipped in the resource pack
-    # (assets/facility/sounds/menu_ambient.ogg). Any sound key works - swap in a
-    # vanilla track or your own. The loop re-plays every interval; the ambient is
-    # ~30s, so half a minute keeps it seamless. Stops when the player presses PLAY.
-    sound: "facility:menu.ambient"
-    interval-minutes: 0.5
-    volume: 1.0
-    pitch: 1.0
+
+  # ---------------------------------------------------------------------------
+  # elements - the ordered contents of the MAIN dialog. Each element is one of:
+  #     {type: button, label: "<&-coloured>", action: "<command>"}
+  #     {type: text,   label: "<&-coloured>"}
+  # A button runs its command (no leading slash) on click; a text element is a
+  # body line. Edit with /facility menu ... or the chest editor
+  # (/facility menu edit). The Stats and Credits buttons are added after these
+  # (see `stats` and `credits` below).
   elements:
     - {type: button, label: "&a&l▶ PLAY", action: "facility continue"}
     - {type: button, label: "&bSELECT TEAM", action: "facility teams"}
+
+  # ---------------------------------------------------------------------------
+  # text - every title, prompt and stock button label in the menu dialogs.
+  # & colour codes work (&6 gold, &l bold, ...). deploy-message is the chat line
+  # a player gets when PLAY drops them into the world ("" = none).
+  text:
+    main-title: "&6&lSITE-19 // MAIN MENU"
+    teams-title: "&6&lSELECT TEAM"
+    teams-prompt: "&7Choose your team."
+    team-locked: "&8  ✖ locked"
+    team-change-title: "&6&lCHANGE TEAM?"
+    spawn-title: "&6&lSELECT SPAWN"
+    spawn-prompt: "&7Choose your spawn point."
+    stats-title: "&6&lYOUR RECORD"
+    stats-button: "&eStats"
+    credits-title: "&6&lCREDITS"
+    credits-button: "&7Credits"
+    back-button: "&7« Back"
+    deploy-message: "&bWelcome to Site-19. Stay sharp."
+
+  # ---------------------------------------------------------------------------
+  # stats - the STATS dialog. It always shows kills, deaths, K/D, deployments,
+  # time on site, last team and last area. `extra` adds lines read from
+  # scoreboard objectives - that is how other plugins and datapacks publish a
+  # number per player. Each entry: {label: "<&-coloured>", objective: "<name>"}.
+  # A player with no score shows a dash.
+  stats:
+    enabled: true
+    extra: []
+    # extra:
+    #   - {label: "Research points", objective: "lab.research"}
+    #   - {label: "Clearance level", objective: "keycard.level"}
+
+  # ---------------------------------------------------------------------------
+  # credits - the CREDITS dialog: one entry per line, & colour codes, "" for a
+  # gap between blocks. It scrolls when it outgrows the screen. Put your staff
+  # here. Keep the SCP Wiki licence block - CC BY-SA requires the attribution.
+  credits:
+    enabled: true
+    lines:
+      - "&6&lSITE-19"
+      - "&7A Foundation site that is having a very bad day."
+      - ""
+      - "&e&lSTAFF"
+      - "&7Site Director &8- &fedit me in config.yml"
+      - "&7Development &8- &fedit me in config.yml"
+      - "&7Builders &8- &fedit me in config.yml"
+      - ""
+      - "&e&lSPECIAL THANKS"
+      - "&7Everyone who tests, reports bugs and dies to SCP-173 for science."
+      - ""
+      - "&e&lLICENCE"
+      - "&7Content relating to the SCP Foundation, including the SCP Foundation logo, is licensed under Creative Commons Attribution-ShareAlike 3.0. All concepts originate from &fscpwiki.com &7and its authors."
+      - "&7This server, being derived from that content, is released under the same licence (CC BY-SA 3.0)."
+      - ""
+      - "&8Not affiliated with Mojang or Microsoft."
+
+  # ---------------------------------------------------------------------------
+  # background - the resource-pack panel image, drawn full-screen behind the
+  # dialog as a custom-textured SUBTITLE. It COVERS the world, so with it on the
+  # shader look below is only seen during the transitions. Off (the default
+  # since 0.19) the backdrop is the live world at the lobby vantage, through
+  # the monitor look - point `lobby` at a good view of the site.
+  background:
+    enabled: false
+
+  # ---------------------------------------------------------------------------
+  # shader - the monitor look over the world behind the menu. A Minecraft 26.3
+  # post effect from the Facility resource pack; on an older server it is
+  # skipped. Players' "Menu Background Blurriness" softens it while a dialog is
+  # open - it is sharp during the transitions.
+  #   look - green   green phosphor terminal
+  #          amber   amber phosphor terminal
+  #          nvg     night vision: amplified and grainy
+  #          mono    cold black-and-white CCTV
+  # Try them live: /facility menu look <name>, /facility menu preview look.
+  # New looks: add one to tools/gen_menu_fx.py and rebuild the pack.
+  shader:
+    enabled: true
+    look: green
+
+  # ---------------------------------------------------------------------------
+  # transitions - the animations and sounds around the menu.
+  #   intro    the monitor powers on when the menu opens
+  #   navigate a click and a short static burst when a button opens a dialog
+  #   deploy   PLAY: static builds, the monitor powers off, the player is
+  #            teleported while the screen is black (hold), then the game
+  #            picture fades in (reveal)
+  #   style - glitch  static, tearing and a CRT power-off
+  #           fade    plain fades to and from black, and no static burst.
+  #                   Choose this if flashing imagery is a concern.
+  # Durations are in ticks (20 = 1 second, max 200); 0 skips that step.
+  # Without the shader (disabled above, or Minecraft < 26.3) there is nothing
+  # to watch, so PLAY teleports at once; the sounds still play.
+  # Preview on yourself: /facility menu preview <intro|glitch|deploy>.
+  transitions:
+    enabled: true
+    style: glitch
+    intro-ticks: 24
+    navigate-ticks: 4
+    deploy-ticks: 24
+    hold-ticks: 8
+    reveal-ticks: 16
+    # Any sound key - these four ship in the resource pack. "" = silent.
+    sounds:
+      boot: "facility:menu.boot"
+      click: "facility:menu.click"
+      glitch: "facility:menu.glitch"
+      deploy: "facility:menu.deploy"
+      volume: 1.0
+
+  # ---------------------------------------------------------------------------
+  # music - plays while a player sits in the menu, stops on PLAY.
+  #   tracks - the playlist. `sound` is any sound key: a vanilla one, or your
+  #            own .ogg registered in the pack's sounds.json (add "stream": true
+  #            for long files). `length-seconds` is the file's real length - the
+  #            server cannot ask the client when a sound ends, so it starts the
+  #            next one on this timer.
+  #   order  - sequence (top to bottom, then again) or shuffle
+  #   overlap-seconds - start the next track this long before the current one
+  #            ends. If the .ogg fades in and out over the same time the seam
+  #            becomes a crossfade (the shipped ambient fades 1.5 s). 0 = play
+  #            back to back.
+  #   category - the volume slider it obeys: music, ambient, record, master...
+  # A config from before 0.19 (music.sound + interval-minutes, no tracks) still
+  # works as it did.
+  music:
+    enabled: true
+    tracks:
+      - {sound: "facility:menu.ambient", length-seconds: 30.0}
+    order: sequence
+    overlap-seconds: 1.5
+    volume: 1.0
+    pitch: 1.0
+    category: music
 
 # Facility-wide BLACKOUT (/facility blackout on|off|toggle [seconds]).
 # When engaged, every WAXED COPPER TRAPDOOR that is a light fixture (TOP half,
@@ -84,6 +205,10 @@ blackout:
 #   type   - public = anyone may join; private = must be granted (/facility grant).
 #   icon   - the Material shown in the team selector.
 #   display- the coloured name shown on the icon.
+#   description - one or two sentences on the team's card in the selector.
+#   perks  - bullet lines under the description. TEXT ONLY: they grant
+#            nothing, so keep them true to the team's kit (/facility kit) and
+#            permissions.
 #
 # These are working EXAMPLES - edit them (or add your own with
 # /facility team add <name> <public|private> <rank> [ICON] [prefix...]).
@@ -96,6 +221,10 @@ teams:
     prefix: "&e[D-Class] "
     permissions:
       - facility.team.classd
+    description: "Test subjects in orange. No rights, no gear, nothing left to lose."
+    perks:
+      - "Open to everyone"
+      - "Strength in numbers"
   guard:
     display: "&9Security"
     type: public
@@ -104,6 +233,10 @@ teams:
     prefix: "&9[Security] "
     permissions:
       - facility.team.guard
+    description: "Site security. Keep the Class-D in line and the anomalies behind their doors."
+    perks:
+      - "Open to everyone"
+      - "Polices the cell blocks and checkpoints"
   scientist:
     display: "&fFoundation Staff"
     type: public
@@ -112,6 +245,10 @@ teams:
     prefix: "&f[Staff] "
     permissions:
       - facility.team.scientist
+    description: "Researchers and site staff. The reason the site exists."
+    perks:
+      - "Open to everyone"
+      - "Works the labs and containment chambers"
   mtf:
     display: "&cMTF Epsilon-11"
     type: private
@@ -120,6 +257,10 @@ teams:
     prefix: "&c[MTF] "
     permissions:
       - facility.team.mtf
+    description: "Mobile Task Force Epsilon-11, \"Nine-Tailed Fox\". Sent in when containment is already lost."
+    perks:
+      - "Invitation only"
+      - "Re-contains breached anomalies"
   et:
     display: "&bE&T Department"
     type: public
@@ -128,6 +269,10 @@ teams:
     prefix: "&b[E&T] "
     permissions:
       - facility.team.et
+    description: "Engineering and Technical. Keeps the doors, lights and generators alive."
+    perks:
+      - "Open to everyone"
+      - "Maintains site systems"
   logistics:
     display: "&6Logistics"
     type: public
@@ -136,6 +281,34 @@ teams:
     prefix: "&6[Logistics] "
     permissions:
       - facility.team.logistics
+    description: "Moves everything the site needs, and knows where all of it went."
+    perks:
+      - "Open to everyone"
+      - "Runs supply and storage"
+  chaos:
+    display: "&2Chaos Insurgency"
+    type: private
+    rank: chaos
+    icon: GREEN_BANNER
+    prefix: "&2[CI] "
+    permissions:
+      - facility.team.chaos
+    description: "Foundation defectors. They want the anomalies for themselves, and the Class-D on their side."
+    perks:
+      - "Invitation only"
+      - "Hostile to Foundation personnel"
+  scp:
+    display: "&4SCP Subject"
+    type: private
+    rank: scp
+    icon: WITHER_SKELETON_SKULL
+    prefix: "&4[SCP] "
+    permissions:
+      - facility.team.scp
+    description: "The reason for the locks. Contained, catalogued, and patient."
+    perks:
+      - "Invitation only"
+      - "Staff-run anomaly roles"
 
 # Per-team grant list for PRIVATE teams. Managed at runtime by
 # /facility grant|revoke - each entry is a player UUID. Do not hand-edit

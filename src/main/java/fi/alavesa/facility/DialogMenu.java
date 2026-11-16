@@ -18,7 +18,9 @@ import org.bukkit.entity.Player;
  * {@code /dialog show <player> {...}}. The MAIN dialog is now built from the
  * operator-editable {@link MenuStore} element list (buttons + text lines), so
  * admins can reshape it at runtime via commands or the chest editor. The TEAM
- * selector is still rebuilt live from config teams. {@code
+ * selector is rebuilt live from config teams, STATS from the player's record
+ * and CREDITS from {@code menu.credits}; every title, prompt and stock button
+ * label comes from {@code menu.text} (see {@link #text}). {@code
  * can_close_with_escape:false} makes the main menu an un-escapable lobby lock.
  *
  * The main dialog also carries a resource-pack BACKGROUND: a bitmap glyph in
@@ -43,6 +45,10 @@ public final class DialogMenu {
     /** How many 1px nudge glyphs to prepend after the rewind (blind pixel work -
      *  needs in-game screenshot tuning). 0 = panel starts at the rewind point. */
     private static final int BG_NUDGE_COUNT = 0;
+
+    /** Text widths in the sub-dialogs, GUI pixels (the client allows 1-1024; 200 is its default). */
+    private static final int CARD_WIDTH = 260;
+    private static final int CREDITS_WIDTH = 300;
 
     private final FacilityPlugin plugin;
     private final TeamManager teams;
@@ -80,6 +86,9 @@ public final class DialogMenu {
         show(player, statsDialog(player));
     }
 
+    public void openCredits(Player player) {
+        show(player, creditsDialog());
+    }
 
     /** Let the player pick which of their team's spawns to deploy at. Each button
      *  runs {@code facility spawn <index>}; a «Back returns to the main menu. */
@@ -89,10 +98,9 @@ public final class DialogMenu {
             actions.append(button(Component.text(spawns.get(i).name(), NamedTextColor.AQUA),
                 "facility spawn " + (i + 1))).append(",");
         }
-        actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "facility back"));
-        String body = "{type:\"minecraft:plain_message\",contents:"
-            + json(Component.text("Choose your spawn point.", NamedTextColor.GRAY)) + "}";
-        show(player, dialog("SELECT SPAWN", body, actions.toString()));
+        actions.append(back());
+        show(player, dialog(text("spawn-title", "&6&lSELECT SPAWN"),
+            message(text("spawn-prompt", "&7Choose your spawn point.")), actions.toString()));
     }
 
     private void show(Player player, String snbt) {
@@ -140,30 +148,64 @@ public final class DialogMenu {
                 actions.append(button(legacy(el.label()), el.action()));
             }
         }
-        // Always offer the stats screen, regardless of the operator's button list.
-        if (actions.length() > 0) actions.append(",");
-        actions.append(button(Component.text("Stats", NamedTextColor.YELLOW), "facility stats"));
-        return dialog("SITE-19 // MAIN MENU", String.join(",", body), actions.toString());
+        // The stats and credits screens are offered regardless of the operator's button list
+        // (menu.stats.enabled / menu.credits.enabled turn them off).
+        if (plugin.getConfig().getBoolean("menu.stats.enabled", true)) {
+            if (actions.length() > 0) actions.append(",");
+            actions.append(button(text("stats-button", "&eStats"), "facility stats"));
+        }
+        if (plugin.getConfig().getBoolean("menu.credits.enabled", true)) {
+            if (actions.length() > 0) actions.append(",");
+            actions.append(button(text("credits-button", "&7Credits"), "facility credits"));
+        }
+        return dialog(text("main-title", "&6&lSITE-19 // MAIN MENU"), String.join(",", body), actions.toString());
     }
 
+    /** The team selector: one card per team in the body (icon, name, description,
+     *  perks), then a join button per team. The body scrolls when the cards
+     *  outgrow the screen; «Back is pinned in the footer. */
     private String teamsDialog(Player player) {
+        java.util.List<String> body = new java.util.ArrayList<>();
+        body.add(message(text("teams-prompt", "&7Choose your team.")));
         StringBuilder actions = new StringBuilder();
         for (Team team : teams.all()) {
+            boolean locked = !teams.mayJoin(team, player);
             Component label = legacy(team.display());
-            if (!teams.mayJoin(team, player)) {
-                label = label.append(Component.text("  ✖ locked", NamedTextColor.DARK_GRAY));
-            }
+            if (locked) label = label.append(text("team-locked", "&8  ✖ locked"));
+            body.add(teamCard(team, label));
             // Either way the command runs: join grants + returns to menu; a denied
             // (private) join messages the player and reopens this selector.
-            actions.append(button(label, "facility team " + team.id())).append(",");
+            if (actions.length() > 0) actions.append(",");
+            actions.append(button(label, "facility team " + team.id(),
+                team.description().isBlank() ? null : legacy(team.description()), 150));
         }
-        actions.append(button(Component.text("« Back", NamedTextColor.GRAY), "facility back"));
-        String body = "{type:\"minecraft:plain_message\",contents:"
-            + json(Component.text("Choose your team.", NamedTextColor.GRAY)) + "}";
-        return dialog("SELECT TEAM", body, actions.toString());
+        return dialog(text("teams-title", "&6&lSELECT TEAM"), String.join(",", body), actions.toString(), 2,
+            button(text("back-button", "&7« Back"), "facility back"));
     }
 
-    /** The player's combat record: kills, deaths, K/D, last team and last area. */
+    /** A team's card: its icon item with the name, description and perks beside it. */
+    private String teamCard(Team team, Component name) {
+        Component card = name.decorate(TextDecoration.BOLD);
+        if (!team.description().isBlank()) {
+            card = card.append(Component.newline())
+                .append(legacy(team.description()).colorIfAbsent(NamedTextColor.GRAY)
+                    .decoration(TextDecoration.BOLD, false));
+        }
+        for (String perk : team.perks()) {
+            if (perk == null || perk.isBlank()) continue;
+            card = card.append(Component.newline())
+                .append(Component.text(" ▸ ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.BOLD, false))
+                .append(legacy(perk).colorIfAbsent(NamedTextColor.DARK_AQUA).decoration(TextDecoration.BOLD, false));
+        }
+        if (!team.iconOr(org.bukkit.Material.PAPER).isItem()) return message(card);
+        return "{type:\"minecraft:item\",item:{id:" + quote(team.iconOr(org.bukkit.Material.PAPER).getKey().toString())
+            + "},description:{contents:" + json(card) + ",width:" + CARD_WIDTH + "}"
+            + ",show_decorations:false,show_tooltip:false}";
+    }
+
+    /** The player's record: combat, deployments, time on site, last team and
+     *  area, then whatever scoreboard objectives {@code menu.stats.extra} names
+     *  (how the sibling plugins publish their numbers - research points, credits...). */
     private String statsDialog(Player player) {
         java.util.UUID id = player.getUniqueId();
         PlayerStore st = plugin.store();
@@ -174,16 +216,66 @@ public final class DialogMenu {
         body.add(statLine("Kills", Component.text(st.kills(id), NamedTextColor.GREEN)));
         body.add(statLine("Deaths", Component.text(st.deaths(id), NamedTextColor.RED)));
         body.add(statLine("K/D", Component.text(String.valueOf(st.kd(id)), NamedTextColor.AQUA)));
+        body.add(statLine("Deployments", Component.text(st.deploys(id), NamedTextColor.AQUA)));
+        int minutes = player.getStatistic(org.bukkit.Statistic.PLAY_ONE_MINUTE) / 1200;   // the stat counts ticks
+        body.add(statLine("Time on site", Component.text((minutes / 60) + " h " + (minutes % 60) + " min",
+            NamedTextColor.AQUA)));
         body.add(statLine("Last played as", team != null ? legacy(team.display())
             : Component.text("—", NamedTextColor.DARK_GRAY)));
         body.add(statLine("Last area", Component.text(lastArea == null ? "—" : lastArea, NamedTextColor.AQUA)));
-        String actions = button(Component.text("« Back", NamedTextColor.GRAY), "facility back");
-        return dialog("YOUR RECORD", String.join(",", body), actions);
+        var board = Bukkit.getScoreboardManager().getMainScoreboard();
+        for (java.util.Map<?, ?> extra : plugin.getConfig().getMapList("menu.stats.extra")) {
+            Object label = extra.get("label");
+            Object objective = extra.get("objective");
+            if (label == null || objective == null) continue;
+            var o = board.getObjective(objective.toString());
+            var score = o == null ? null : o.getScore(player.getName());
+            body.add(statLine(label.toString(), score != null && score.isScoreSet()
+                ? Component.text(score.getScore(), NamedTextColor.AQUA)
+                : Component.text("—", NamedTextColor.DARK_GRAY)));
+        }
+        return dialog(text("stats-title", "&6&lYOUR RECORD"), String.join(",", body), "", 1, back());
+    }
+
+    /** Server lore, staff and licence notes: {@code menu.credits.lines}, one
+     *  body line each (a blank entry is a gap). Scrolls; «Back stays in the footer. */
+    private String creditsDialog() {
+        java.util.List<String> body = new java.util.ArrayList<>();
+        StringBuilder paragraph = new StringBuilder();
+        for (String line : plugin.getConfig().getStringList("menu.credits.lines")) {
+            // consecutive lines share one text block so they sit tight; a blank line starts the next block
+            if (line.isBlank()) {
+                if (paragraph.length() > 0) body.add(message(legacy(paragraph.toString()), CREDITS_WIDTH));
+                paragraph.setLength(0);
+            } else {
+                if (paragraph.length() > 0) paragraph.append('\n');
+                paragraph.append(line);
+            }
+        }
+        if (paragraph.length() > 0) body.add(message(legacy(paragraph.toString()), CREDITS_WIDTH));
+        return dialog(text("credits-title", "&6&lCREDITS"), String.join(",", body), "", 1, back());
     }
 
     private String statLine(String label, Component value) {
-        Component c = Component.text(label + ": ", NamedTextColor.GRAY).append(value);
+        return message(legacy(label + ": ").colorIfAbsent(NamedTextColor.GRAY).append(value));
+    }
+
+    /** One body text block. */
+    private String message(Component c) {
         return "{type:\"minecraft:plain_message\",contents:" + json(c) + "}";
+    }
+
+    private String message(Component c, int width) {
+        return "{type:\"minecraft:plain_message\",contents:" + json(c) + ",width:" + width + "}";
+    }
+
+    /** A title, prompt or stock button label from {@code menu.text.<key>} (&-coloured). */
+    private Component text(String key, String def) {
+        return legacy(plugin.getConfig().getString("menu.text." + key, def));
+    }
+
+    private String back() {
+        return button(text("back-button", "&7« Back"), "facility back");
     }
 
     /** The background as a body element: the panel glyph, preceded by the
@@ -217,21 +309,35 @@ public final class DialogMenu {
             .append(legacy(newTeam.display()))
             .append(Component.text(" will WIPE your current playthrough — your saved position and ALL your items. "
                 + "Are you sure?", NamedTextColor.RED));
-        show(player, dialog("CHANGE TEAM?", "{type:\"minecraft:plain_message\",contents:" + json(warn) + "}", actions));
+        show(player, dialog(text("team-change-title", "&6&lCHANGE TEAM?"), message(warn), actions));
     }
 
-    private String dialog(String title, String bodyCsv, String actionsCsv) {
-        return "{type:\"minecraft:multi_action\""
-            + ",title:" + json(Component.text(title, NamedTextColor.GOLD, TextDecoration.BOLD))
-            + ",can_close_with_escape:false"
-            + ",body:[" + bodyCsv + "]"
-            + ",columns:1"
-            + ",actions:[" + actionsCsv + "]}";
+    private String dialog(Component title, String bodyCsv, String actionsCsv) {
+        return dialog(title, bodyCsv, actionsCsv, 1, null);
+    }
+
+    /** {@code exit} (a button, or null) sits in the dialog's footer, below the
+     *  scrolling part. With no action buttons at all the dialog is a
+     *  {@code notice}: the body and that one footer button. */
+    private String dialog(Component title, String bodyCsv, String actionsCsv, int columns, String exit) {
+        String head = ",title:" + json(title) + ",can_close_with_escape:false" + ",body:[" + bodyCsv + "]";
+        if (actionsCsv.isEmpty() && exit != null) {
+            return "{type:\"minecraft:notice\"" + head + ",action:" + exit + "}";
+        }
+        return "{type:\"minecraft:multi_action\"" + head
+            + ",columns:" + columns
+            + ",actions:[" + actionsCsv + "]"
+            + (exit == null ? "" : ",exit_action:" + exit) + "}";
     }
 
     /** One full-width action button that runs a player command on click. */
     private String button(Component label, String command) {
-        return "{label:" + json(label) + ",width:200"
+        return button(label, command, null, 200);
+    }
+
+    private String button(Component label, String command, Component tooltip, int width) {
+        return "{label:" + json(label) + ",width:" + width
+            + (tooltip == null ? "" : ",tooltip:" + json(tooltip))
             + ",action:{type:\"minecraft:run_command\",command:" + quote(command) + "}}";
     }
 

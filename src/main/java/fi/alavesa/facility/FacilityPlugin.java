@@ -38,6 +38,7 @@ public final class FacilityPlugin extends JavaPlugin {
     private CombatLogListener combat;
     private MenuStore menuStore;
     private MenuEditor menuEditor;
+    private MenuAudioAndVisualPacketHandler menuFx;
     private BlackoutManager blackout;
     private AreaManager areas;
     private StashManager stashes;
@@ -64,7 +65,8 @@ public final class FacilityPlugin extends JavaPlugin {
         menuStore = new MenuStore(this);
         dialogMenu = new DialogMenu(this, teams, menuStore);
         combat = new CombatLogListener(this, store);
-        lobby = new LobbyManager(this, store, dialogMenu, teams, combat);
+        menuFx = new MenuAudioAndVisualPacketHandler(this);
+        lobby = new LobbyManager(this, store, dialogMenu, teams, combat, menuFx);
         menuEditor = new MenuEditor(this, menuStore);
         blackout = new BlackoutManager(this);
         areas = new AreaManager(this);
@@ -105,6 +107,7 @@ public final class FacilityPlugin extends JavaPlugin {
     public void onDisable() {
         if (blackout != null && blackout.isActive()) blackout.end();   // restore lights
         if (combat != null) combat.shutdown();
+        if (menuFx != null) menuFx.shutdown();   // nobody keeps the menu look after a /reload
         // TextDisplay holograms are entities and despawn/expire on their own;
         // nothing persistent to clean beyond the boss bars above.
         getLogger().info("SITE-19 FACILITY // offline");
@@ -192,6 +195,13 @@ public final class FacilityPlugin extends JavaPlugin {
                 dialogMenu.openStats(player);
                 return true;
             }
+            case "credits" -> {
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                if (!player.hasPermission("facility.use")) return error(sender, "No permission.");
+                lobby.menuInteracted(player);   // stop join re-sends from clobbering this dialog
+                dialogMenu.openCredits(player);
+                return true;
+            }
             case "snav" -> {
                 // Give the S-Nav navigator item (ops / creative). Right-click it to project the map.
                 if (!sender.hasPermission("facility.admin")) return error(sender, "No permission.");
@@ -274,6 +284,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 reloadConfig();
                 teams.load();
                 kits.reload();
+                menuFx.reload();   // re-validates menu.shader / transitions / music, restyles open menus
                 sender.sendMessage(Component.text("Facility config reloaded - teams: "
                     + teams.ids(), NamedTextColor.AQUA));
                 return true;
@@ -489,6 +500,33 @@ public final class FacilityPlugin extends JavaPlugin {
                 menuEditor.open(player);
                 return true;
             }
+            case "look" -> {
+                // /facility menu look <name|off> - the monitor look behind the menu, saved to config.
+                if (args.length < 3) return error(sender, "/facility menu look <"
+                    + String.join("|", MenuSettings.LOOKS) + "|off>");
+                String look = args[2].toLowerCase(Locale.ROOT);
+                if (look.equals("off")) {
+                    getConfig().set("menu.shader.enabled", false);
+                } else {
+                    if (!look.matches("[a-z0-9_]+")) return error(sender, "Look names are a-z, 0-9 and _.");
+                    getConfig().set("menu.shader.enabled", true);
+                    getConfig().set("menu.shader.look", look);
+                }
+                saveConfig();
+                menuFx.reload();
+                sender.sendMessage(Component.text("Menu look: " + look + ". See it with /facility menu preview look.",
+                    NamedTextColor.AQUA));
+                return true;
+            }
+            case "preview" -> {
+                // /facility menu preview <look|intro|glitch|deploy> - play it on yourself, in the world.
+                if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                String what = args.length >= 3 ? args[2].toLowerCase(Locale.ROOT) : "look";
+                if (!List.of("look", "intro", "glitch", "deploy").contains(what))
+                    return error(sender, "/facility menu preview <look|intro|glitch|deploy>");
+                if (!menuFx.preview(player, what)) return error(sender, "A menu effect is already playing on you.");
+                return true;
+            }
             case "add" -> {
                 if (args.length < 3) return error(sender, "/facility menu add <button <action> <label...>|text <label...>>");
                 String kind = args[2].toLowerCase(Locale.ROOT);
@@ -581,7 +619,8 @@ public final class FacilityPlugin extends JavaPlugin {
         sender.sendMessage(Component.text(
             "/facility menu list | edit | add button <action> <label...> | add text <label...> | "
             + "remove <index> | move <index> up|down | setlabel <index> <label...> | "
-            + "setaction <index> <command...>", NamedTextColor.AQUA));
+            + "setaction <index> <command...> | look <name|off> | preview <look|intro|glitch|deploy>",
+            NamedTextColor.AQUA));
         return true;
     }
 
@@ -721,7 +760,7 @@ public final class FacilityPlugin extends JavaPlugin {
         boolean admin = sender.hasPermission("facility.admin");
         return switch (args.length) {
             case 1 -> {
-                List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats"));
+                List<String> top = new ArrayList<>(List.of("continue", "teams", "team", "stats", "credits"));
                 if (admin) top.addAll(List.of("grant", "revoke", "reload", "menu", "blackout", "area",
                     "snav", "snavplane", "kit"));
                 yield filter(top.stream(), args[0]);
@@ -736,7 +775,7 @@ public final class FacilityPlugin extends JavaPlugin {
                 case "kit" -> admin ? filter(teams.ids().stream(), args[1]) : List.of();
                 case "grant", "revoke" -> filter(online(), args[1]);
                 case "menu" -> admin ? filter(Stream.of("list", "edit", "add", "remove",
-                    "move", "setlabel", "setaction"), args[1]) : List.of();
+                    "move", "setlabel", "setaction", "look", "preview"), args[1]) : List.of();
                 case "blackout" -> admin ? filter(Stream.of("on", "off", "toggle"), args[1]) : List.of();
                 case "area" -> admin ? filter(Stream.of("pos1", "pos2", "create", "remove", "rename", "list",
                     "effect", "cleareffects", "scp008", "breakable", "sound", "clearsounds"), args[1]) : List.of();
@@ -769,6 +808,8 @@ public final class FacilityPlugin extends JavaPlugin {
     private List<String> menuArgComplete(String[] args) {
         String sub = args[1].toLowerCase(Locale.ROOT);
         if (sub.equals("add")) return filter(Stream.of("button", "text"), args[2]);
+        if (sub.equals("look")) return filter(Stream.concat(MenuSettings.LOOKS.stream(), Stream.of("off")), args[2]);
+        if (sub.equals("preview")) return filter(Stream.of("look", "intro", "glitch", "deploy"), args[2]);
         if (sub.equals("remove") || sub.equals("move")
             || sub.equals("setlabel") || sub.equals("setaction")) {
             List<String> nums = new ArrayList<>();

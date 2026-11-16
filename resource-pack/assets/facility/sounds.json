@@ -5,5 +5,20 @@
     "sounds": [
       { "name": "facility:menu_ambient", "stream": true }
     ]
+  },
+  "menu.click": {
+    "sounds": [ "facility:menu_click" ]
+  },
+  "menu.glitch": {
+    "subtitle": "Signal glitch",
+    "sounds": [ "facility:menu_glitch" ]
+  },
+  "menu.boot": {
+    "subtitle": "Monitor powers on",
+    "sounds": [ "facility:menu_boot" ]
+  },
+  "menu.deploy": {
+    "subtitle": "Monitor powers off",
+    "sounds": [ "facility:menu_deploy" ]
   }
 }
